@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>YouTube PC Remote - Điều Khiển Từ Xa</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="bg-[#07080d] text-slate-100 min-h-screen flex flex-col justify-between selection:bg-red-600 selection:text-white pb-safe">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-[#0d0f17]/90 backdrop-blur-lg border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-xl bg-red-600 flex items-center justify-center text-white shadow-lg shadow-red-600/30">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
+          <line x1="2" y1="20" x2="2.01" y2="20"></line>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold text-white flex items-center gap-1.5 leading-tight">
+          <span>YouTube TV Remote</span>
+          <span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-red-950 text-red-400 border border-red-800/40">iPHONE</span>
+        </h1>
+        <div class="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
+          <span id="conn-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="conn-text" class="text-emerald-400 font-medium">Đã kết nối máy tính</span>
+        </div>
+      </div>
+    </div>
+    <button onclick="toggleFullscreen()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-xs font-medium text-slate-300 flex items-center gap-1 transition-all">
+      <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+      <span>Toàn màn hình</span>
+    </button>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
+
+    <!-- Currently Playing Card -->
+    <div class="bg-gradient-to-br from-[#121524] to-[#0a0c14] border border-slate-800 rounded-2xl p-3.5 shadow-xl space-y-3">
+      <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
+          <span>Đang chiếu trên PC</span>
+        </span>
+        <span id="playing-source" class="text-slate-400 text-[10px] font-normal truncate max-w-[140px]">Standby</span>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <img id="video-thumb" src="https://img.youtube.com/vi/LXb3EKWsInQ/hqdefault.jpg" alt="Thumbnail" class="w-20 h-14 rounded-xl object-cover bg-black border border-slate-800 shrink-0">
+        <div class="min-w-0 flex-1">
+          <div id="video-title" class="text-xs font-bold text-white line-clamp-2 leading-snug">Thiên Nhiên 4K Ultra HD</div>
+          <div id="video-id-display" class="text-[10px] text-slate-400 font-mono mt-0.5">ID: LXb3EKWsInQ</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cast Box -->
+    <div class="bg-[#0e111a] border border-slate-800/80 rounded-2xl p-4 space-y-3 shadow-lg">
+      <div class="flex items-center justify-between">
+        <label class="text-xs font-bold text-white flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/></svg>
+          <span>Dán Link YouTube Chiếu Ngay</span>
+        </label>
+        <button onclick="pasteFromClipboard()" class="text-[10px] text-slate-400 hover:text-white bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60 active:scale-95 transition-all">
+          📋 Dán nhanh
+        </button>
+      </div>
+
+      <div class="relative">
+        <input 
+          id="url-input" 
+          type="text" 
+          placeholder="Dán link (youtu.be/...) hoặc video ID..." 
+          class="w-full px-3.5 py-3 bg-black/60 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition-colors pr-10"
+        />
+        <button onclick="document.getElementById('url-input').value = ''" class="absolute right-3 top-3 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      </div>
+
+      <button 
+        onclick="castInputVideo()" 
+        class="w-full py-3 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 active:scale-98 text-white rounded-xl text-xs font-bold shadow-lg shadow-red-600/30 transition-all flex items-center justify-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+        <span>CHIẾU LÊN MÁY TÍNH (CAST)</span>
+      </button>
+    </div>
+
+    <!-- Remote Playback Controls Pad -->
+    <div class="bg-[#0e111a] border border-slate-800/80 rounded-2xl p-4 space-y-4 shadow-lg">
+      <div class="text-[11px] font-bold text-slate-300 uppercase tracking-wider text-center">
+        BÀN PHÍM ĐIỀU KHIỂN TỪ XA
+      </div>
+
+      <!-- Main playback buttons -->
+      <div class="flex items-center justify-center gap-5">
+        <!-- Rewind 10s -->
+        <button onclick="sendControl('seek', -10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+          <span class="text-[9px] font-bold -mt-0.5">-10s</span>
+        </button>
+
+        <!-- Big Play/Pause -->
+        <button id="btn-play-pause" onclick="togglePlayPause()" class="w-16 h-16 rounded-3xl bg-red-600 hover:bg-red-500 active:scale-95 text-white flex items-center justify-center shadow-xl shadow-red-600/40 border border-red-400/40 transition-all">
+          <svg id="icon-pause" class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          <svg id="icon-play" class="w-7 h-7 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+
+        <!-- Forward 10s -->
+        <button onclick="sendControl('seek', 10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
+          <span class="text-[9px] font-bold -mt-0.5">+10s</span>
+        </button>
+      </div>
+
+      <!-- Volume & Mute Controls -->
+      <div class="bg-black/50 border border-slate-800/80 rounded-2xl p-3 space-y-2.5">
+        <div class="flex items-center justify-between text-xs">
+          <div class="flex items-center gap-1.5 text-slate-300 font-semibold">
+            <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+            <span>Âm lượng PC</span>
+          </div>
+          <span id="volume-display" class="font-mono text-white font-bold bg-slate-800 px-2 py-0.5 rounded text-[11px]">80%</span>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button onclick="changeVolume(-10)" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-white font-bold flex items-center justify-center text-base shadow-sm">
+            -
+          </button>
+          
+          <input 
+            id="volume-slider" 
+            type="range" 
+            min="0" 
+            max="100" 
+            value="80" 
+            oninput="onVolumeSliderChange(this.value)"
+            class="flex-1 accent-red-600 h-2 bg-slate-800 rounded-lg cursor-pointer"
+          />
+
+          <button onclick="changeVolume(10)" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-white font-bold flex items-center justify-center text-base shadow-sm">
+            +
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 pt-1">
+          <button id="btn-mute" onclick="toggleMute()" class="py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 active:scale-95 hover:bg-slate-800 text-xs font-semibold text-slate-200 flex items-center justify-center gap-1.5 transition-all">
+            <svg id="icon-volume-on" class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+            <svg id="icon-volume-off" class="w-4 h-4 text-red-400 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+            <span id="mute-text">Tắt tiếng</span>
+          </button>
+
+          <button onclick="toggleFullscreen()" class="py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 active:scale-95 hover:bg-slate-800 text-xs font-semibold text-slate-200 flex items-center justify-center gap-1.5 transition-all">
+            <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+            <span>Toàn màn hình PC</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick 1-Tap Preset Channels -->
+    <div class="bg-[#0e111a] border border-slate-800/80 rounded-2xl p-4 space-y-2.5 shadow-lg">
+      <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+        KÊNH XEM NHANH 1 CHẠM:
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <button onclick="castVideo('LXb3EKWsInQ', '4K Nature Costa Rica Wildlife')" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-left active:scale-95 transition-all">
+          <div class="font-bold text-white">🌿 Thiên Nhiên 4K</div>
+          <div class="text-[10px] text-slate-400">Hình ảnh siêu sắc nét</div>
+        </button>
+        <button onclick="castVideo('jfKfPfyJRdk', 'Lofi Girl - Relax & Study')" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-left active:scale-95 transition-all">
+          <div class="font-bold text-white">☕ Lofi Chill Beats</div>
+          <div class="text-[10px] text-slate-400">Thư giãn làm việc</div>
+        </button>
+        <button onclick="castVideo('jNQXAC9IVRw', 'Me at the zoo (First YouTube Video)')" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-left active:scale-95 transition-all">
+          <div class="font-bold text-white">🐘 Me at the zoo</div>
+          <div class="text-[10px] text-slate-400">Clip ngắn kiểm tra</div>
+        </button>
+        <button onclick="castVideo('M7lc1UVf-VE', 'YouTube Developers Demo')" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-left active:scale-95 transition-all">
+          <div class="font-bold text-white">🎬 YouTube Demo</div>
+          <div class="text-[10px] text-slate-400">Video chính thức</div>
+        </button>
+      </div>
+    </div>
+
+    <!-- TV Code Assistant -->
+    <div class="bg-black/40 border border-slate-800/60 rounded-2xl p-3.5 space-y-2 text-xs text-slate-400">
+      <div class="flex items-center justify-between text-slate-300">
+        <span class="font-semibold text-white">Mã TV kết nối (YouTube App):</span>
+        <span id="tv-code-display" class="font-mono text-red-400 font-bold">---</span>
+      </div>
+      <p class="text-[11px] leading-relaxed">
+        Trong app YouTube trên iPhone: vào <strong>Cài đặt &gt; Xem trên TV &gt; Nhập mã TV</strong> và điền mã trên nếu muốn kết nối trực tiếp trong app YouTube.
+      </p>
+    </div>
+
+  </main>
+
+  <footer class="text-center py-3 text-[10px] text-slate-500 font-mono">
+    YouTube Cast Remote Lite · Chạy trực tiếp từ iPhone
+  </footer>
+
+  <script>
+    let ws = null;
+    let isPlaying = true;
+    let isMuted = false;
+
+    function connectWs() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          document.getElementById('conn-dot').className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+          document.getElementById('conn-text').textContent = 'Đã kết nối máy tính';
+          document.getElementById('conn-text').className = 'text-emerald-400 font-medium';
+        };
+
+        ws.onclose = () => {
+          document.getElementById('conn-dot').className = 'w-2 h-2 rounded-full bg-amber-400';
+          document.getElementById('conn-text').textContent = 'Đang kết nối lại...';
+          document.getElementById('conn-text').className = 'text-amber-400 font-medium';
+          setTimeout(connectWs, 3000);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'cast_video' && data.video) {
+              updatePlayingInfo(data.video);
+            }
+            if (data.pairingCode) {
+              document.getElementById('tv-code-display').textContent = data.pairingCode;
+            }
+          } catch {}
+        };
+      } catch {
+        setTimeout(connectWs, 3000);
+      }
+    }
+
+    function updatePlayingInfo(video) {
+      if (video.title) document.getElementById('video-title').textContent = video.title;
+      if (video.videoId) {
+        document.getElementById('video-id-display').textContent = 'ID: ' + video.videoId;
+        document.getElementById('video-thumb').src = `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`;
+      }
+      if (video.source) document.getElementById('playing-source').textContent = video.source;
+      if (typeof video.isPlaying === 'boolean') {
+        isPlaying = video.isPlaying;
+        updatePlayIcons();
+      }
+    }
+
+    function updatePlayIcons() {
+      if (isPlaying) {
+        document.getElementById('icon-pause').classList.remove('hidden');
+        document.getElementById('icon-play').classList.add('hidden');
+      } else {
+        document.getElementById('icon-pause').classList.add('hidden');
+        document.getElementById('icon-play').classList.remove('hidden');
+      }
+    }
+
+    function sendControl(action, value) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'control', action, value, offset: value }));
+      }
+      if (navigator.vibrate) navigator.vibrate(25);
+    }
+
+    let currentVolume = 80;
+
+    function updateMuteUi() {
+      const iconOn = document.getElementById('icon-volume-on');
+      const iconOff = document.getElementById('icon-volume-off');
+      const muteText = document.getElementById('mute-text');
+      if (isMuted) {
+        iconOn.classList.add('hidden');
+        iconOff.classList.remove('hidden');
+        muteText.textContent = 'Bật tiếng';
+        muteText.className = 'text-red-400 font-semibold';
+      } else {
+        iconOn.classList.remove('hidden');
+        iconOff.classList.add('hidden');
+        muteText.textContent = 'Tắt tiếng';
+        muteText.className = 'text-slate-200';
+      }
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      updateMuteUi();
+      sendControl(isMuted ? 'mute' : 'unMute');
+    }
+
+    function changeVolume(delta) {
+      currentVolume = Math.max(0, Math.min(100, currentVolume + delta));
+      document.getElementById('volume-slider').value = currentVolume;
+      document.getElementById('volume-display').textContent = currentVolume + '%';
+      if (isMuted && delta > 0) {
+        isMuted = false;
+        updateMuteUi();
+      }
+      sendControl('setVolume', currentVolume);
+    }
+
+    function onVolumeSliderChange(val) {
+      currentVolume = Number(val);
+      document.getElementById('volume-display').textContent = currentVolume + '%';
+      if (isMuted && currentVolume > 0) {
+        isMuted = false;
+        updateMuteUi();
+      }
+      sendControl('setVolume', currentVolume);
+    }
+
+    function togglePlayPause() {
+      isPlaying = !isPlaying;
+      updatePlayIcons();
+      sendControl(isPlaying ? 'play' : 'pause');
+    }
+
+    function toggleFullscreen() {
+      fetch('/api/fullscreen', { method: 'POST' }).catch(() => {});
+      sendControl('toggleFullscreen');
+    }
+
+    function castVideo(videoId, title) {
+      fetch('/api/cast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId, title })
+      });
+      if (navigator.vibrate) navigator.vibrate(40);
+    }
+
+    function extractVideoId(input) {
+      const match = input.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/)|youtu\.be\/|^)([\w-]{11})/);
+      return match ? match[1] : (input.length === 11 ? input : null);
+    }
+
+    function castInputVideo() {
+      const input = document.getElementById('url-input').value.trim();
+      if (!input) return;
+
+      const vid = extractVideoId(input);
+      if (vid) {
+        castVideo(vid, 'Cast từ iPhone Remote');
+        document.getElementById('url-input').value = '';
+      } else {
+        alert('Vui lòng dán link video YouTube hợp lệ hoặc ID 11 ký tự!');
+      }
+    }
+
+    async function pasteFromClipboard() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          document.getElementById('url-input').value = text;
+          castInputVideo();
+        }
+      } catch {
+        const input = prompt('Dán link video YouTube vào đây:');
+        if (input) {
+          document.getElementById('url-input').value = input;
+          castInputVideo();
+        }
+      }
+    }
+
+    // Continuous status sync with PC (polling every 2s as backup for WebSocket)
+    function syncStatus() {
+      fetch('/api/status')
+        .then(r => r.json())
+        .then(d => {
+          if (d.currentVideo) updatePlayingInfo(d.currentVideo);
+          if (d.pairingCode) document.getElementById('tv-code-display').textContent = d.pairingCode;
+        })
+        .catch(() => {});
+    }
+
+    syncStatus();
+    setInterval(syncStatus, 2000);
+
+    // Sync immediately when user unlocks iPhone or switches back to Safari
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        syncStatus();
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          connectWs();
+        }
+      }
+    });
+
+    connectWs();
+  </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+build/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Cache & persistence
+.node-persist/
+.antigravity/
+.vscode/
+
+# Temp test files
+test-*.mjs
+inspect-*.mjs
+toggle-fullscreen.ps1
