@@ -337,6 +337,156 @@ class WebCastPlayer extends Player {
 }
 
 const ytPlayer = new WebCastPlayer();
+const persistentStore = new PersistentDataStore();
+
+// ==========================================
+// MULTI-MONITOR / DISPLAY SELECTION SYSTEM
+// Cho phép chọn màn hình hiển thị (Màn hình chính / Màn hình phụ / TV) và tự động ghi nhớ cho các lần mở sau
+// ==========================================
+export interface DisplayInfo {
+  id: number;
+  deviceName: string;
+  primary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+let cachedDisplays: DisplayInfo[] = [];
+let preferredDisplayDeviceName: string = '';
+
+function runPowerShellEncoded(psScript: string): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve('');
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, { timeout: 6000 }, (err, stdout) => {
+      if (err) return resolve('');
+      resolve((stdout || '').trim());
+    });
+  });
+}
+
+async function detectDisplays(): Promise<DisplayInfo[]> {
+  if (process.platform !== 'win32') {
+    cachedDisplays = [{ id: 1, deviceName: 'DISPLAY1', primary: true, x: 0, y: 0, width: 1920, height: 1080 }];
+    return cachedDisplays;
+  }
+
+  const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+$screens = @([System.Windows.Forms.Screen]::AllScreens)
+$result = @()
+for ($i = 0; $i -lt $screens.Count; $i++) {
+  $s = $screens[$i]
+  $result += [PSCustomObject]@{
+    id = $i + 1
+    deviceName = $s.DeviceName
+    primary = [bool]$s.Primary
+    x = [int]$s.Bounds.X
+    y = [int]$s.Bounds.Y
+    width = [int]$s.Bounds.Width
+    height = [int]$s.Bounds.Height
+  }
+}
+$result | ConvertTo-Json -Compress
+`;
+  const out = await runPowerShellEncoded(ps);
+  try {
+    if (out) {
+      const parsed = JSON.parse(out);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      if (arr.length > 0) {
+        cachedDisplays = arr;
+      }
+    }
+  } catch {}
+
+  if (cachedDisplays.length === 0) {
+    cachedDisplays = [{ id: 1, deviceName: '\\\\.\\DISPLAY1', primary: true, x: 0, y: 0, width: 1920, height: 1080 }];
+  }
+  return cachedDisplays;
+}
+
+async function getTargetDisplay(): Promise<DisplayInfo> {
+  if (cachedDisplays.length === 0) {
+    await detectDisplays();
+  }
+  if (!preferredDisplayDeviceName) {
+    const saved = await persistentStore.get('tv.preferredDisplay');
+    if (typeof saved === 'string' && saved) {
+      preferredDisplayDeviceName = saved;
+    }
+  }
+  if (preferredDisplayDeviceName) {
+    const match = cachedDisplays.find(d => d.deviceName === preferredDisplayDeviceName);
+    if (match) return match;
+  }
+  return cachedDisplays.find(d => d.primary) || cachedDisplays[0];
+}
+
+// Ghi tọa độ màn hình đã chọn vào Chrome Profile Preferences để Chrome mở đúng màn hình ngay từ đầu
+function updateChromeProfilePlacement(display: DisplayInfo) {
+  try {
+    const tempDir = process.env.TEMP || os.tmpdir();
+    const defaultDir = path.join(tempDir, 'YouTubeTV_Profile', 'Default');
+    fs.mkdirSync(defaultDir, { recursive: true });
+    const prefFile = path.join(defaultDir, 'Preferences');
+    let prefs: any = {};
+    if (fs.existsSync(prefFile)) {
+      try {
+        prefs = JSON.parse(fs.readFileSync(prefFile, 'utf8'));
+      } catch {}
+    }
+    if (!prefs.browser) prefs.browser = {};
+    prefs.browser.window_placement = {
+      bottom: display.y + display.height,
+      left: display.x,
+      maximized: true,
+      right: display.x + display.width,
+      top: display.y,
+      work_area_bottom: display.y + display.height,
+      work_area_left: display.x,
+      work_area_right: display.x + display.width,
+      work_area_top: display.y
+    };
+    fs.writeFileSync(prefFile, JSON.stringify(prefs), 'utf8');
+  } catch {}
+}
+
+// Di chuyển ngay lập tức cửa sổ TV Kiosk đang mở sang màn hình được chọn bằng Win32 API
+async function moveKioskWindowToDisplay(display: DisplayInfo) {
+  updateChromeProfilePlacement(display);
+  if (process.platform !== 'win32') return;
+
+  const ps = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32TvMover {
+  [DllImport("user32.dll")]
+  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+
+$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' }
+foreach ($p in $procs) {
+  try {
+    $procObj = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+    if ($procObj -and $procObj.MainWindowHandle -ne 0) {
+      $h = $procObj.MainWindowHandle
+      [Win32TvMover]::ShowWindow($h, 9) | Out-Null
+      [Win32TvMover]::SetWindowPos($h, [IntPtr]::Zero, ${display.x}, ${display.y}, ${display.width}, ${display.height}, 0x0040) | Out-Null
+      [Win32TvMover]::ShowWindow($h, 3) | Out-Null
+      [Win32TvMover]::SetWindowPos($h, [IntPtr]::Zero, ${display.x}, ${display.y}, ${display.width}, ${display.height}, 0x0040) | Out-Null
+    }
+  } catch {}
+}
+`;
+  await runPowerShellEncoded(ps);
+}
 
 // Chuẩn hóa mọi bản tin setPlaylist / updatePlaylist từ iPhone để:
 // 1. Khi vuốt xuống tìm kiếm và chọn video đơn lẻ (không có listId hoặc currentIndex), video luôn tự phát ngay lập tức
@@ -431,9 +581,15 @@ const ytReceiver = new YouTubeCastReceiver(ytPlayer, {
     playlistRequestHandler: new FastPlaylistRequestHandler() as any,
     resetPlayerOnDisconnectPolicy: Constants.RESET_PLAYER_ON_DISCONNECT_POLICIES.ALL_EXPLICITLY_DISCONNECTED
   },
-  dataStore: new PersistentDataStore() as any,
+  dataStore: persistentStore as any,
   logLevel: 'warn'
 });
+
+// Khởi tạo nhận diện màn hình và cấu hình vị trí cửa sổ đã lưu ngay khi bật server
+detectDisplays().then(() => getTargetDisplay()).then((target) => {
+  updateChromeProfilePlacement(target);
+  console.log(`[Display Manager] Màn hình khởi động đã chọn: Màn hình ${target.id} (${target.deviceName}) [${target.x},${target.y} ${target.width}x${target.height}]`);
+}).catch(() => {});
 
 ytReceiver.on('senderConnect', (sender: any) => {
   console.log(`[YouTube Cast] Connected to sender: ${sender?.name || 'iPhone'}`);
@@ -454,6 +610,11 @@ wss.on('connection', (ws: WebSocket) => {
     volume: currentVolumeLevel,
     isMuted: isVolumeMuted
   }));
+
+  // Đảm bảo cửa sổ Kiosk tự động di chuyển đúng sang màn hình đã lưu khi vừa mở
+  getTargetDisplay().then((target) => {
+    moveKioskWindowToDisplay(target).catch(() => {});
+  }).catch(() => {});
 
   ws.on('message', (raw: Buffer | string) => {
     try {
@@ -683,6 +844,53 @@ app.post('/api/refresh-code', async (req, res) => {
   return res.json({ 
     success: true, 
     pairingCode: formatPairingCode(realPairingCode) 
+  });
+});
+
+// Lấy danh sách màn hình kết nối và màn hình đang được chọn lưu
+app.get('/api/displays', async (req, res) => {
+  const displays = await detectDisplays();
+  const target = await getTargetDisplay();
+  return res.json({
+    displays,
+    selectedDeviceName: target.deviceName,
+    selectedDisplay: target
+  });
+});
+
+// Trả về cờ vị trí màn hình cho start.bat (--window-position=X,Y --window-size=W,H)
+app.get('/api/display-flags', async (req, res) => {
+  const target = await getTargetDisplay();
+  updateChromeProfilePlacement(target);
+  res.type('text/plain').send(`--window-position=${target.x},${target.y} --window-size=${target.width},${target.height}`);
+});
+
+// Chọn và lưu màn hình hiển thị TV (chuyển cửa sổ ngay lập tức & lưu cho lần khởi động sau)
+app.post('/api/displays/select', async (req, res) => {
+  const { deviceName, id } = req.body || {};
+  const displays = await detectDisplays();
+  const target = displays.find(d => (deviceName && d.deviceName === deviceName) || (id && d.id === Number(id)));
+  if (!target) {
+    return res.status(400).json({ error: 'Display not found' });
+  }
+
+  preferredDisplayDeviceName = target.deviceName;
+  await persistentStore.set('tv.preferredDisplay', target.deviceName);
+  console.log(`[Display Manager] Đã lưu cài đặt màn hình: Màn hình ${target.id} (${target.deviceName}) [${target.x},${target.y}]`);
+
+  await moveKioskWindowToDisplay(target);
+
+  broadcastControl({
+    action: 'displayChanged',
+    selectedDeviceName: target.deviceName,
+    selectedDisplay: target
+  });
+
+  return res.json({
+    success: true,
+    selectedDeviceName: target.deviceName,
+    selectedDisplay: target,
+    displays
   });
 });
 

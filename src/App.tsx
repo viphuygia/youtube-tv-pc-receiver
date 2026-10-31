@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Cast, Smartphone, Play, Maximize2, Minimize2, 
   Volume2, VolumeX, CheckCircle2, Copy, ExternalLink,
-  Laptop, RefreshCw, Terminal, QrCode, Globe, Power
+  Laptop, RefreshCw, Terminal, QrCode, Globe, Power, Monitor
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { translations, Lang } from './i18n';
@@ -14,6 +14,16 @@ interface CastedVideo {
   startSeconds?: number;
   timestamp: number;
   source: string;
+}
+
+interface DisplayInfo {
+  id: number;
+  deviceName: string;
+  primary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export default function App() {
@@ -44,6 +54,10 @@ export default function App() {
     return 30; // Mặc định 30% khi khởi động theo yêu cầu của người dùng
   });
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [showDisplayModal, setShowDisplayModal] = useState<boolean>(false);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  const [selectedDisplay, setSelectedDisplay] = useState<DisplayInfo | null>(null);
+  const [isSwitchingDisplay, setIsSwitchingDisplay] = useState<boolean>(false);
   const [isAppClosed, setIsAppClosed] = useState<boolean>(false);
   const [lang, setLang] = useState<Lang>(() => {
     if (typeof window !== 'undefined') {
@@ -258,10 +272,57 @@ export default function App() {
         .catch(() => {});
     };
 
+    const fetchDisplays = () => {
+      fetch('/api/displays')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data.displays)) {
+            setDisplays(data.displays);
+          }
+          if (data.selectedDisplay) {
+            setSelectedDisplay(data.selectedDisplay);
+          }
+        })
+        .catch(() => {});
+    };
+
     fetchStatus();
+    fetchDisplays();
     const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleOpenDisplayModal = () => {
+    setShowDisplayModal(true);
+    fetch('/api/displays')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data.displays)) setDisplays(data.displays);
+        if (data.selectedDisplay) setSelectedDisplay(data.selectedDisplay);
+      })
+      .catch(() => {});
+  };
+
+  const handleSelectDisplay = async (display: DisplayInfo) => {
+    setIsSwitchingDisplay(true);
+    try {
+      const res = await fetch('/api/displays/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceName: display.deviceName, id: display.id })
+      });
+      const data = await res.json();
+      if (data.selectedDisplay) {
+        setSelectedDisplay(data.selectedDisplay);
+      }
+      if (Array.isArray(data.displays)) {
+        setDisplays(data.displays);
+      }
+      setShowDisplayModal(false);
+    } catch {} finally {
+      setIsSwitchingDisplay(false);
+    }
+  };
 
   const handleRefreshCode = async () => {
     setIsRefreshing(true);
@@ -395,6 +456,8 @@ export default function App() {
                 sendIframeCommand('seekTo', [target, true]);
               } else if (data.action === 'toggleFullscreen') {
                 toggleFullscreen();
+              } else if (data.action === 'displayChanged' && data.selectedDisplay) {
+                setSelectedDisplay(data.selectedDisplay);
               } else if (data.action === 'quit') {
                 setIsAppClosed(true);
                 try {
@@ -603,6 +666,16 @@ export default function App() {
             <span className="hidden sm:inline">{t.scanRemoteBtn}</span>
           </button>
           <button
+            onClick={handleOpenDisplayModal}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
+            title={t.monitorModalTitle}
+          >
+            <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+            <span>
+              {t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}
+            </span>
+          </button>
+          <button
             onClick={() => setShowLocalGuide(!showLocalGuide)}
             className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-colors flex items-center gap-1.5"
           >
@@ -766,6 +839,18 @@ export default function App() {
             >
               <QrCode className="w-4 h-4 text-red-400 animate-pulse" />
               <span className="font-semibold text-slate-100 hidden sm:inline">QR Remote</span>
+            </button>
+
+            {/* Nút chọn Màn hình (Lưu tự động cho những lần mở sau) */}
+            <button
+              onClick={handleOpenDisplayModal}
+              className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-emerald-400/60"
+              title={t.monitorModalTitle}
+            >
+              <Monitor className="w-4 h-4 text-emerald-400" />
+              <span className="font-semibold text-slate-100">
+                {t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}
+              </span>
             </button>
 
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs">
@@ -1067,6 +1152,79 @@ export default function App() {
 
             <div className="text-[11px] font-mono text-emerald-400 bg-slate-900/80 py-2 px-3 rounded-xl border border-slate-800 break-all select-all">
               http://{statusInfo.localIp}:{statusInfo.port}/remote
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Chon Man Hinh Hien Thi (Tu dong nho cho lan khoi dong sau) */}
+      {showDisplayModal && (
+        <div
+          className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setShowDisplayModal(false)}
+        >
+          <div
+            className="bg-[#0f1422] border-2 border-emerald-500/50 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowDisplayModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white text-base w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-colors"
+            >
+              ✕
+            </button>
+
+            <div className="flex items-center gap-2.5 text-emerald-400 font-bold text-sm uppercase tracking-wider">
+              <Monitor className="w-5 h-5" />
+              <span>{t.monitorModalTitle}</span>
+            </div>
+
+            <p className="text-slate-300 text-xs leading-relaxed">
+              {t.monitorModalDesc}
+            </p>
+
+            <div className="space-y-2.5 pt-1">
+              {displays.map((d) => {
+                const isSelected = selectedDisplay?.deviceName === d.deviceName;
+                return (
+                  <button
+                    key={d.deviceName}
+                    disabled={isSwitchingDisplay}
+                    onClick={() => handleSelectDisplay(d)}
+                    className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-emerald-950/50 border-emerald-500 text-white shadow-lg shadow-emerald-600/20'
+                        : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="font-bold text-sm flex items-center gap-2">
+                        <Monitor className={`w-4 h-4 ${isSelected ? 'text-emerald-400' : 'text-slate-400'}`} />
+                        <span>
+                          {t.monitorBtn} {d.id} ({d.primary ? t.monitorPrimary : t.monitorSecondary})
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-400">
+                        {d.width}×{d.height} · Vị trí ({d.x}, {d.y})
+                      </div>
+                      {isSelected && (
+                        <div className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1 pt-0.5">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{t.monitorSavedBadge}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
+                      isSelected
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {isSelected ? '✓' : (lang === 'vi' ? 'Chọn' : 'Select')}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

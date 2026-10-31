@@ -45,7 +45,10 @@ set "EDGE_PATH="
 if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" set "EDGE_PATH=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
 if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set "EDGE_PATH=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
 
-set FLAGS=--user-data-dir="%TEMP%\YouTubeTV_Profile" --autoplay-policy=no-user-gesture-required --no-first-run --start-fullscreen --kiosk "http://localhost:8547?tv=1"
+set "POS_FLAGS="
+for /f "delims=" %%i in ('curl -s http://localhost:8547/api/display-flags') do set "POS_FLAGS=%%i"
+
+set FLAGS=--user-data-dir="%TEMP%\YouTubeTV_Profile" %POS_FLAGS% --autoplay-policy=no-user-gesture-required --no-first-run --start-fullscreen --kiosk "http://localhost:8547?tv=1"
 
 if defined CHROME_PATH (
     start "" "%CHROME_PATH%" %FLAGS%
