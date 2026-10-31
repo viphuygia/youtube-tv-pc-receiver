@@ -71,7 +71,8 @@ function getLocalIpAddress(): string {
 }
 
 const localIp = getLocalIpAddress();
-const DEVICE_NAME = 'PC Windows (YouTube TV)';
+const pcHostname = os.hostname() || 'Windows-PC';
+const DEVICE_NAME = `Youtube TV (${pcHostname})`;
 
 // Store current casted video and connected clients
 let currentVideo = {

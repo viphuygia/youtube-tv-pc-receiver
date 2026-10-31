@@ -16,7 +16,7 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 
 ### ✨ Key Features
 
-- 📡 **Native YouTube Cast (iOS & Android):** Automatic discovery over local Wi-Fi via DIAL/SSDP protocol, plus instant pairing via official 12-digit YouTube TV code (displayed both on the top bar and in Fullscreen mode).
+- 📡 **Native YouTube Cast (iOS & Android):** Automatic discovery over local Wi-Fi via DIAL/SSDP protocol with dynamic device naming **`Youtube TV (<PC-Hostname>)`** (easy to distinguish when installed on multiple PCs), plus instant pairing via official 12-digit YouTube TV code.
 - ⏱️ **True 1:1 Duration & Timeline Sync:** Two-way YouTube IFrame Widget API bridge (`infoDelivery` + `player_sync`) synchronizes the exact video length and real-time playback position with your phone's scrub bar and `+/- 10s` seek buttons.
 - 🔄 **Seamless Video Switching & Queue Browsing:** Swipe down the mini-player on your iPhone to search and select new videos freely without losing connection or resetting the queue, powered by a 0ms non-blocking `FastPlaylistRequestHandler` and persistent device identity (`.yt-cast-store.json`).
 - 🖥️ **Multi-Monitor Selector with Persistent Memory:** Automatically detects all monitors connected to your Windows PC (`Primary` / `Secondary / TV`). Switch the fullscreen TV window to any monitor with 1 click and automatically open on that saved monitor on every future startup.
@@ -83,7 +83,7 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
 
 ### ✨ Tính Năng Nổi Bật
 
-- 📡 **Cast trực tiếp từ app YouTube (iOS & Android):** Tự động tìm thấy qua Wi-Fi bằng chuẩn DIAL/SSDP hoặc liên kết qua mã TV 12 số (hiển thị ngay trên đầu trang và trên thanh điều khiển khi đã Fullscreen).
+- 📡 **Cast trực tiếp từ app YouTube (iOS & Android):** Tự động tìm thấy qua Wi-Fi bằng chuẩn DIAL/SSDP với tên thiết bị động **`Youtube TV (<Tên-máy-tính>)`** (dễ dàng phân biệt khi cài trên nhiều máy tính trong cùng mạng), hoặc liên kết qua mã TV 12 số.
 - ⏱️ **Đồng Bộ Thời Gian Thực 1:1 (Duration & Seek Sync):** Cầu nối hai chiều với YouTube IFrame Player (`infoDelivery` + `player_sync`) đồng bộ chính xác tổng thời lượng thật và giây đang phát của từng video lên thanh trượt iPhone — tua `+10s/-10s` hoặc kéo thanh thời gian tới bất kỳ đâu đều mượt mà, không bao giờ bị nhảy về `0s`.
 - 🔄 **Chuyển Video & Vuốt Tìm Kiếm Không Ngắt Kết Nối:** Thoải mái vuốt thu nhỏ video trên iPhone để tìm kiếm và chọn phát video mới mà không bị văng kết nối nhờ bộ xử lý hàng đợi tức thì `FastPlaylistRequestHandler` (0ms) và cơ chế lưu định danh TV cố định (`.yt-cast-store.json`).
 - 🖥️ **Chọn & Tự Động Ghi Nhớ Màn Hình Hiển Thị (`🖥️ Màn hình 1 / 2`):** Tự động nhận diện tất cả màn hình đang cắm vào PC (Màn hình Chính / Màn hình Phụ / TV). Bấm chọn màn hình nào là cửa sổ TV nhảy ngay sang màn hình đó và tự động mở đúng trên màn hình đó ở mọi lần khởi động sau.

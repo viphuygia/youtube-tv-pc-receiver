@@ -66,7 +66,7 @@ start chrome.exe %FLAGS% || start msedge.exe %FLAGS%
 echo.
 echo ========================================================
 echo   TV DA SAN SANG HOAT DONG!
-echo   * Ten hien thi tren iPhone: "PC Windows (YouTube TV)"
+echo   * Ten hien thi tren iPhone: "Youtube TV (%COMPUTERNAME%)"
 echo   * Che do tu dong phat (Autoplay): DA BAT
 echo   * Che do toan man hinh (Kiosk): DA BAT
 echo   * Dong cua so nay khi ban muon tat TV.

@@ -225,7 +225,7 @@ export default function App() {
   }>({
     localIp: '127.0.0.1',
     port: 8547,
-    deviceName: 'PC Windows (YouTube TV)',
+    deviceName: 'Youtube TV (PC)',
     pairingCode: 'Đang tải mã...',
     isLoungeConnected: false
   });
