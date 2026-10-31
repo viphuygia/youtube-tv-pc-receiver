@@ -25,10 +25,16 @@ if not exist node_modules (
 echo [1/3] Dang khoi dong may chu TV Receiver...
 start /b cmd /c "npx tsx server.ts"
 
-echo [2/3] Dang cho may chu san sang (2 giay)...
-ping 127.0.0.1 -n 3 >nul
+echo [2/3] Dang cho may chu khoi dong tren cong 8547...
+:WAIT_SERVER
+curl -s -f http://localhost:8547/api/status >nul 2>&1
+if %errorlevel% neq 0 (
+    ping 127.0.0.1 -n 2 >nul
+    goto WAIT_SERVER
+)
+echo [OK] May chu da san sang!
 
-echo [3/3] Dang mo TV o che do tu dong phat (Autoplay On)...
+echo [3/3] Dang mo TV o che do Toan man hinh va Tu dong phat...
 
 set "CHROME_PATH="
 if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
@@ -59,6 +65,7 @@ echo ========================================================
 echo   TV DA SAN SANG HOAT DONG!
 echo   * Ten hien thi tren iPhone: "PC Windows (YouTube TV)"
 echo   * Che do tu dong phat (Autoplay): DA BAT
+echo   * Che do toan man hinh (Kiosk): DA BAT
 echo   * Dong cua so nay khi ban muon tat TV.
 echo ========================================================
 echo.

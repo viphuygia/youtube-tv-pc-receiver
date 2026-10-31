@@ -134,7 +134,7 @@
             <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
             <span>Âm lượng PC</span>
           </div>
-          <span id="volume-display" class="font-mono text-white font-bold bg-slate-800 px-2 py-0.5 rounded text-[11px]">80%</span>
+          <span id="volume-display" class="font-mono text-white font-bold bg-slate-800 px-2 py-0.5 rounded text-[11px]">30%</span>
         </div>
 
         <div class="flex items-center gap-3">
@@ -147,7 +147,7 @@
             type="range" 
             min="0" 
             max="100" 
-            value="80" 
+            value="30" 
             oninput="onVolumeSliderChange(this.value)"
             class="flex-1 accent-red-600 h-2 bg-slate-800 rounded-lg cursor-pointer"
           />
@@ -245,6 +245,15 @@
             if (data.type === 'cast_video' && data.video) {
               updatePlayingInfo(data.video);
             }
+            if (typeof data.volume === 'number') {
+              currentVolume = data.volume;
+              document.getElementById('volume-slider').value = currentVolume;
+              document.getElementById('volume-display').textContent = currentVolume + '%';
+            }
+            if (typeof data.isMuted === 'boolean') {
+              isMuted = data.isMuted;
+              updateMuteUi();
+            }
             if (data.pairingCode) {
               document.getElementById('tv-code-display').textContent = data.pairingCode;
             }
@@ -285,7 +294,7 @@
       if (navigator.vibrate) navigator.vibrate(25);
     }
 
-    let currentVolume = 80;
+    let currentVolume = 30;
 
     function updateMuteUi() {
       const iconOn = document.getElementById('icon-volume-on');

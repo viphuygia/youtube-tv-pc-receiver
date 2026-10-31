@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
-import YouTubeCastReceiver, { Player } from 'yt-cast-receiver';
+import YouTubeCastReceiver, { Player, Constants } from 'yt-cast-receiver';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -130,13 +130,24 @@ wss.on('connection', (ws: WebSocket) => {
   ws.send(JSON.stringify({ 
     type: 'cast_video', 
     video: currentVideo,
-    pairingCode: formatPairingCode(realPairingCode)
+    pairingCode: formatPairingCode(realPairingCode),
+    volume: currentVolumeLevel,
+    isMuted: isVolumeMuted
   }));
 
   ws.on('message', (raw: Buffer | string) => {
     try {
       const data = JSON.parse(raw.toString());
       if (data.type === 'control') {
+        if (data.action === 'setVolume' && typeof data.value === 'number') {
+          currentVolumeLevel = Math.max(0, Math.min(100, Math.round(data.value)));
+          isVolumeMuted = false;
+        } else if (data.action === 'mute') {
+          isVolumeMuted = true;
+        } else if (data.action === 'unMute') {
+          isVolumeMuted = false;
+        }
+
         // Forward control commands (togglePlay, play, pause, toggleMute, toggleFullscreen, seek, setVolume)
         connectedClients.forEach(client => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
@@ -174,7 +185,9 @@ class MemoryDataStore {
   setLogger() {}
 }
 
-// Biến theo dõi vị trí và thời gian phát video thực tế cho iPhone
+// Biến theo dõi âm lượng, vị trí và thời gian phát video thực tế cho iPhone
+let currentVolumeLevel = 30; // Mặc định 30% khi khởi động theo yêu cầu của người dùng
+let isVolumeMuted = false;
 let currentPositionSeconds = 0;
 let positionLastUpdated = Date.now();
 let isVideoPlaying = true;
@@ -225,10 +238,10 @@ class WebCastPlayer extends Player {
   }
 
   protected async doStop(): Promise<boolean> {
-    console.log('[YouTube Cast from iPhone] Stop command');
+    console.log('[YouTube Cast from iPhone] Stop/Transition command');
     isVideoPlaying = false;
     currentPositionSeconds = 0;
-    broadcastControl({ action: 'pause' });
+    // Không gửi lệnh pause khi đổi video để tránh làm gián đoạn chuyển bài
     return true;
   }
 
@@ -243,6 +256,8 @@ class WebCastPlayer extends Player {
 
   protected async doSetVolume(volume: { level: number; muted: boolean }): Promise<boolean> {
     console.log(`[YouTube Cast from iPhone] Set volume: ${volume.level}%, muted: ${volume.muted}`);
+    currentVolumeLevel = Math.max(0, Math.min(100, Math.round(volume.level)));
+    isVolumeMuted = Boolean(volume.muted);
     if (volume.muted) {
       broadcastControl({ action: 'mute' });
     } else {
@@ -252,7 +267,7 @@ class WebCastPlayer extends Player {
   }
 
   protected async doGetVolume() {
-    return { level: 80, muted: false };
+    return { level: currentVolumeLevel, muted: isVolumeMuted };
   }
 
   protected async doGetPosition(): Promise<number> {
@@ -282,6 +297,9 @@ const ytReceiver = new YouTubeCastReceiver(ytPlayer, {
   dataStore: new MemoryDataStore(),
   logLevel: 'warn'
 });
+
+// Giữ phiên Lounge không bị ngắt khi iPhone chuyển video (chỉ ngắt khi người dùng bấm ngắt kết nối rõ ràng)
+ytReceiver.setResetPlayerOnDisconnectPolicy(Constants.RESET_PLAYER_ON_DISCONNECT_POLICIES.ALL_EXPLICITLY_DISCONNECTED);
 
 ytReceiver.on('senderConnect', (sender: any) => {
   console.log(`[YouTube Cast] Connected to sender: ${sender?.name || 'iPhone'}`);
@@ -381,6 +399,8 @@ app.get('/api/status', (req, res) => {
     rawPairingCode: realPairingCode,
     isLoungeConnected: (ytReceiver.status as string) === 'running',
     currentVideo,
+    volume: currentVolumeLevel,
+    isMuted: isVolumeMuted,
     connectedScreenClients: connectedClients.size
   });
 });

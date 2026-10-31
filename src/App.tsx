@@ -24,13 +24,23 @@ export default function App() {
     source: 'Chế độ chờ (Standby)'
   });
 
+  const [initialVideoId] = useState<string>(video.videoId);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
     return params.get('tv') === '1' || params.get('fullscreen') === '1';
   });
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [volume, setVolume] = useState<number>(80);
+  const [volume, setVolume] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('yt_receiver_volume');
+      if (saved !== null) {
+        const parsed = Number(saved);
+        if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) return parsed;
+      }
+    }
+    return 30; // Mặc định 30% khi khởi động theo yêu cầu của người dùng
+  });
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [lang, setLang] = useState<Lang>(() => {
     if (typeof window !== 'undefined') {
@@ -46,6 +56,20 @@ export default function App() {
       localStorage.setItem('yt_receiver_lang', lang);
     }
   }, [lang]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yt_receiver_volume', String(volume));
+    }
+  }, [volume]);
+
+  // Set initial volume 30% to iframe once ready
+  useEffect(() => {
+    const t = setTimeout(() => {
+      sendIframeCommand('setVolume', [volume]);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, []);
 
   const [statusInfo, setStatusInfo] = useState<{ 
     localIp: string; 
@@ -156,15 +180,17 @@ export default function App() {
             const data = JSON.parse(event.data);
             if (data.type === 'cast_video' && data.video?.videoId) {
               setVideo(data.video);
+              if (typeof data.volume === 'number') {
+                setVolume(data.volume);
+              }
+              if (typeof data.isMuted === 'boolean') {
+                setIsMuted(data.isMuted);
+              }
               // Sử dụng API loadVideoById của YouTube để video mới tự động phát 100% kèm âm thanh
-              sendIframeCommand('loadVideoById', [{
-                videoId: data.video.videoId,
-                startSeconds: 0
-              }]);
-              // Gửi thêm lệnh playVideo sau 300ms để đảm bảo phát ngay
+              sendIframeCommand('loadVideoById', [data.video.videoId, 0]);
               setTimeout(() => {
                 sendIframeCommand('playVideo', []);
-              }, 300);
+              }, 250);
             } else if (data.type === 'pairing_code' && data.pairingCode) {
               setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
             } else if (data.type === 'control') {
@@ -292,13 +318,10 @@ export default function App() {
       source
     });
 
-    sendIframeCommand('loadVideoById', [{
-      videoId,
-      startSeconds: 0
-    }]);
+    sendIframeCommand('loadVideoById', [videoId, 0]);
     setTimeout(() => {
       sendIframeCommand('playVideo', []);
-    }, 300);
+    }, 250);
 
     // 2. Broadcast to server so all iPhone Remotes and connected devices sync immediately!
     fetch('/api/cast', {
@@ -507,9 +530,9 @@ export default function App() {
             />
           )}
 
-          {/* Real YouTube Player Embed (Khong dung dynamic key de giu iframe ton tai lau dai, giup Autoplay khong bi chan) */}
+          {/* Real YouTube Player Embed (Khong dung dynamic key/src de giu iframe ton tai lau dai, giup Autoplay va phien ket noi luon on dinh) */}
           <iframe
-            src={`https://www.youtube.com/embed/${video.videoId}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
+            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
             title={video.title}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
@@ -526,6 +549,21 @@ export default function App() {
 
           {/* Fullscreen control overlay */}
           <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+            {/* TV Code badge when Fullscreen right next to QR icon */}
+            <div 
+              onClick={() => setShowQrModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-2 text-xs shadow-lg cursor-pointer hover:border-amber-400/60"
+              title={lang === 'vi' ? 'Mã liên kết TV (Bấm để xem chi tiết)' : 'TV Pairing Code (Click to view)'}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-slate-300 font-bold uppercase text-[10px]">
+                {lang === 'vi' ? 'Mã TV' : 'TV Code'}:
+              </span>
+              <span className="font-mono font-black text-amber-300 tracking-wider text-xs sm:text-sm">
+                {statusInfo.pairingCode || '...'}
+              </span>
+            </div>
+
             <button
               onClick={() => setShowQrModal(true)}
               className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-red-500/50"
