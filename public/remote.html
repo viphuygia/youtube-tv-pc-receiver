@@ -109,7 +109,7 @@
       <!-- Main playback buttons -->
       <div class="flex items-center justify-center gap-5">
         <!-- Rewind 10s -->
-        <button onclick="sendControl('seek', -10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
+        <button onclick="sendControl('seekRelative', -10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
           <span class="text-[9px] font-bold -mt-0.5">-10s</span>
         </button>
@@ -121,7 +121,7 @@
         </button>
 
         <!-- Forward 10s -->
-        <button onclick="sendControl('seek', 10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
+        <button onclick="sendControl('seekRelative', 10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
           <span class="text-[9px] font-bold -mt-0.5">+10s</span>
         </button>

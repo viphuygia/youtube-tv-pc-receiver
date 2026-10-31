@@ -9,6 +9,7 @@ coverage/
 
 # Cache & persistence
 .node-persist/
+.yt-cast-store.json
 .antigravity/
 .vscode/
 

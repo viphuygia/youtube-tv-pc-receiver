@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  Cast, Wifi, Smartphone, Monitor, Play, Maximize2, Minimize2, 
-  Volume2, VolumeX, CheckCircle2, Copy, Sparkles, ExternalLink,
-  Laptop, RefreshCw, Terminal, HelpCircle, QrCode, Globe
+  Cast, Smartphone, Play, Maximize2, Minimize2, 
+  Volume2, VolumeX, CheckCircle2, Copy, ExternalLink,
+  Laptop, RefreshCw, Terminal, QrCode, Globe, Power
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { translations, Lang } from './i18n';
@@ -11,6 +11,7 @@ interface CastedVideo {
   videoId: string;
   title: string;
   isPlaying: boolean;
+  startSeconds?: number;
   timestamp: number;
   source: string;
 }
@@ -20,6 +21,7 @@ export default function App() {
     videoId: 'LXb3EKWsInQ', // Default 4K Nature relaxation
     title: 'Thiên Nhiên 4K Ultra HD',
     isPlaying: true,
+    startSeconds: 0,
     timestamp: Date.now(),
     source: 'Chế độ chờ (Standby)'
   });
@@ -42,6 +44,7 @@ export default function App() {
     return 30; // Mặc định 30% khi khởi động theo yêu cầu của người dùng
   });
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [isAppClosed, setIsAppClosed] = useState<boolean>(false);
   const [lang, setLang] = useState<Lang>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('yt_receiver_lang') as Lang) || 'vi';
@@ -51,25 +54,153 @@ export default function App() {
 
   const t = translations[lang];
 
+  // Refs để đồng bộ chính xác với YouTube IFrame Player và WebSocket
+  const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const currentVideoIdRef = useRef<string>(video.videoId);
+  const volumeRef = useRef<number>(volume);
+  const isMutedRef = useRef<boolean>(isMuted);
+  const playerTimeRef = useRef<number>(0);
+  const playerDurationRef = useRef<number>(0);
+  const playerStateRef = useRef<number>(-1);
+  const lastSyncSentRef = useRef<number>(0);
+  const hasConnectedWsOnceRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    currentVideoIdRef.current = video.videoId;
+  }, [video.videoId]);
+
+  useEffect(() => {
+    volumeRef.current = volume;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yt_receiver_volume', String(volume));
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('yt_receiver_lang', lang);
     }
   }, [lang]);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('yt_receiver_volume', String(volume));
+  // Kích hoạt kết nối hai chiều (listening handshake) với YouTube Embed IFrame
+  const activateYouTubeBridge = useCallback(() => {
+    const iframe = iframeRef.current || containerRef.current?.querySelector('iframe');
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }),
+        '*'
+      );
     }
-  }, [volume]);
-
-  // Set initial volume 30% to iframe once ready
-  useEffect(() => {
-    const t = setTimeout(() => {
-      sendIframeCommand('setVolume', [volume]);
-    }, 1500);
-    return () => clearTimeout(t);
   }, []);
+
+  // Gửi lệnh điều khiển chuẩn tới YouTube IFrame API (loadVideoById, seekTo, playVideo, pauseVideo, setVolume...)
+  const sendIframeCommand = useCallback((func: string, args: any[] = []) => {
+    const iframe = iframeRef.current || containerRef.current?.querySelector('iframe');
+    if (iframe && iframe.contentWindow) {
+      // Luôn gửi gói listening trước để đảm bảo YouTube IFrame đã mở kênh nhận lệnh
+      iframe.contentWindow.postMessage(
+        JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }),
+        '*'
+      );
+      iframe.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func, args, id: 1, channel: 'widget' }),
+        '*'
+      );
+    }
+  }, []);
+
+  // Lắng nghe sự kiện thời gian thực (currentTime, duration, playerState) từ YouTube IFrame trả về
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (!event.origin.includes('youtube.com')) return;
+      if (typeof event.data !== 'string') return;
+
+      try {
+        const data = JSON.parse(event.data);
+
+        // Khi trình phát YouTube sẵn sàng -> thiết lập ngay âm lượng 30% (hoặc mức đã lưu)
+        if (data.event === 'onReady' || data.event === 'initialDelivery') {
+          sendIframeCommand('setVolume', [volumeRef.current]);
+          if (isMutedRef.current) {
+            sendIframeCommand('mute', []);
+          } else {
+            sendIframeCommand('unMute', []);
+          }
+        }
+
+        if (data.event === 'infoDelivery' || data.event === 'initialDelivery' || data.event === 'onStateChange') {
+          const info = data.info;
+          let forceImmediateSync = false;
+
+          if (info && typeof info === 'object') {
+            if (typeof info.currentTime === 'number' && !isNaN(info.currentTime)) {
+              playerTimeRef.current = info.currentTime;
+            }
+            if (typeof info.duration === 'number' && info.duration > 0) {
+              if (Math.abs(info.duration - playerDurationRef.current) >= 1) {
+                forceImmediateSync = true;
+              }
+              playerDurationRef.current = info.duration;
+            }
+            if (typeof info.playerState === 'number') {
+              if (info.playerState !== playerStateRef.current) {
+                forceImmediateSync = true;
+              }
+              playerStateRef.current = info.playerState;
+            }
+          } else if (data.event === 'onStateChange' && typeof info === 'number') {
+            if (info !== playerStateRef.current) {
+              forceImmediateSync = true;
+            }
+            playerStateRef.current = info;
+          }
+
+          const now = Date.now();
+          if (forceImmediateSync || now - lastSyncSentRef.current >= 500) {
+            lastSyncSentRef.current = now;
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({
+                  type: 'player_sync',
+                  videoId: currentVideoIdRef.current,
+                  position: playerTimeRef.current,
+                  duration: playerDurationRef.current,
+                  playerState: playerStateRef.current
+                })
+              );
+            }
+          }
+        }
+      } catch {
+        // ignore non-JSON messages
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Định kỳ kích hoạt cầu nối với YouTube IFrame để đảm bảo không bao giờ mất kết nối sự kiện
+    const bridgeInterval = setInterval(() => {
+      activateYouTubeBridge();
+    }, 1000);
+
+    // Thiết lập âm lượng khởi tạo
+    const volInitTimer = setTimeout(() => {
+      activateYouTubeBridge();
+      sendIframeCommand('setVolume', [volumeRef.current]);
+    }, 1200);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(bridgeInterval);
+      clearTimeout(volInitTimer);
+    };
+  }, [activateYouTubeBridge, sendIframeCommand]);
 
   const [statusInfo, setStatusInfo] = useState<{ 
     localIp: string; 
@@ -86,14 +217,10 @@ export default function App() {
   });
   const [testInput, setTestInput] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
-  const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [copiedRemoteUrl, setCopiedRemoteUrl] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [showLocalGuide, setShowLocalGuide] = useState<boolean>(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
   // Generate QR code for mobile remote control
   useEffect(() => {
@@ -151,15 +278,16 @@ export default function App() {
     }
   };
 
-  const sendIframeCommand = (func: string, args: any[] = []) => {
-    const iframe = containerRef.current?.querySelector('iframe');
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage(JSON.stringify({
-        event: 'command',
-        func,
-        args
-      }), '*');
-    }
+  // Tắt ứng dụng từ màn hình Fullscreen
+  const handleQuitApp = async () => {
+    try {
+      await fetch('/api/quit', { method: 'POST' });
+    } catch {}
+    setIsAppClosed(true);
+    try {
+      window.open('', '_self');
+      window.close();
+    } catch {}
   };
 
   // Connect WebSocket to receive real-time cast commands from iPhone / server
@@ -179,22 +307,40 @@ export default function App() {
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'cast_video' && data.video?.videoId) {
+              const incomingVid = data.video.videoId;
+              const startSec = Number(data.video.startSeconds) || 0;
+              const isInitialSameDefault = !hasConnectedWsOnceRef.current && incomingVid === currentVideoIdRef.current && startSec === 0;
+              hasConnectedWsOnceRef.current = true;
+
+              currentVideoIdRef.current = incomingVid;
               setVideo(data.video);
-              if (typeof data.volume === 'number') {
-                setVolume(data.volume);
+
+              if (typeof data.pairingCode === 'string' && data.pairingCode) {
+                setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
               }
-              if (typeof data.isMuted === 'boolean') {
-                setIsMuted(data.isMuted);
+
+              // Nếu không phải gói chào ban đầu trùng với video mặc định đang phát, tải ngay video mới
+              if (!isInitialSameDefault) {
+                playerTimeRef.current = startSec;
+                playerDurationRef.current = 0;
+                activateYouTubeBridge();
+                sendIframeCommand('loadVideoById', [incomingVid, startSec]);
+                setTimeout(() => {
+                  sendIframeCommand('playVideo', []);
+                  sendIframeCommand('setVolume', [volumeRef.current]);
+                  if (isMutedRef.current) {
+                    sendIframeCommand('mute', []);
+                  } else {
+                    sendIframeCommand('unMute', []);
+                  }
+                }, 200);
               }
-              // Sử dụng API loadVideoById của YouTube để video mới tự động phát 100% kèm âm thanh
-              sendIframeCommand('loadVideoById', [data.video.videoId, 0]);
-              setTimeout(() => {
-                sendIframeCommand('playVideo', []);
-              }, 250);
             } else if (data.type === 'pairing_code' && data.pairingCode) {
               setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
             } else if (data.type === 'control') {
-              if (data.action === 'play') {
+              if (data.action === 'updateTitle' && data.title) {
+                setVideo(prev => (prev.videoId === data.videoId ? { ...prev, title: data.title } : prev));
+              } else if (data.action === 'play') {
                 sendIframeCommand('playVideo', []);
                 setVideo(prev => ({ ...prev, isPlaying: true }));
               } else if (data.action === 'pause') {
@@ -238,11 +384,23 @@ export default function App() {
                 setIsMuted(false);
                 sendIframeCommand('unMute', []);
                 sendIframeCommand('setVolume', [vol]);
-              } else if (data.action === 'seek') {
-                const offset = Number(data.value ?? data.offset) || 10;
-                sendIframeCommand('seekTo', [offset, true]);
+              } else if (data.action === 'seekTo' || data.action === 'seek') {
+                const target = Math.max(0, Number(data.value ?? data.offset) || 0);
+                playerTimeRef.current = target;
+                sendIframeCommand('seekTo', [target, true]);
+              } else if (data.action === 'seekRelative') {
+                const delta = Number(data.value ?? data.offset) || 0;
+                const target = Math.max(0, playerTimeRef.current + delta);
+                playerTimeRef.current = target;
+                sendIframeCommand('seekTo', [target, true]);
               } else if (data.action === 'toggleFullscreen') {
                 toggleFullscreen();
+              } else if (data.action === 'quit') {
+                setIsAppClosed(true);
+                try {
+                  window.open('', '_self');
+                  window.close();
+                } catch {}
               }
             }
           } catch {
@@ -251,10 +409,10 @@ export default function App() {
         };
 
         ws.onclose = () => {
-          reconnectTimer = setTimeout(connect, 3000);
+          reconnectTimer = setTimeout(connect, 2000);
         };
       } catch {
-        reconnectTimer = setTimeout(connect, 3000);
+        reconnectTimer = setTimeout(connect, 2000);
       }
     };
 
@@ -264,7 +422,7 @@ export default function App() {
       if (ws) ws.close();
       clearTimeout(reconnectTimer);
     };
-  }, []);
+  }, [activateYouTubeBridge, sendIframeCommand]);
 
   // Handle Fullscreen toggle
   const toggleFullscreen = () => {
@@ -285,7 +443,9 @@ export default function App() {
 
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
+      if (document.fullscreenElement) {
+        setIsFullscreen(true);
+      }
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
@@ -300,30 +460,39 @@ export default function App() {
         toggleFullscreen();
       }
       if (e.key === 'm' || e.key === 'M') {
-        setIsMuted(prev => !prev);
+        setIsMuted(prev => {
+          const next = !prev;
+          sendIframeCommand(next ? 'mute' : 'unMute', []);
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [sendIframeCommand]);
 
   // Unified video cast helper: updates local screen AND syncs to server so iPhone Remote updates
   const castVideoOnScreen = (videoId: string, title?: string, source: string = 'Màn hình PC') => {
-    // 1. Immediately update UI locally and send loadVideoById
+    currentVideoIdRef.current = videoId;
+    playerTimeRef.current = 0;
+    playerDurationRef.current = 0;
+
     setVideo({
       videoId,
       title: title || `YouTube Video (${videoId})`,
       isPlaying: true,
+      startSeconds: 0,
       timestamp: Date.now(),
       source
     });
 
+    activateYouTubeBridge();
     sendIframeCommand('loadVideoById', [videoId, 0]);
     setTimeout(() => {
       sendIframeCommand('playVideo', []);
-    }, 250);
+      sendIframeCommand('setVolume', [volumeRef.current]);
+    }, 200);
 
-    // 2. Broadcast to server so all iPhone Remotes and connected devices sync immediately!
     fetch('/api/cast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -344,7 +513,6 @@ export default function App() {
     const input = testInput.trim();
     if (!input) return;
 
-    // Immediately extract 11-char ID client-side so UI reacts instantly
     const match = input.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/)|youtu\.be\/|^)([\w-]{11})/);
     const videoId = match ? match[1] : (input.length === 11 ? input : null);
 
@@ -368,11 +536,21 @@ export default function App() {
     }
   };
 
-  const handleCopyIp = () => {
-    navigator.clipboard.writeText(`http://${statusInfo.localIp}:${statusInfo.port}`);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
+  if (isAppClosed) {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <div className="w-16 h-16 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-500">
+          <Power className="w-8 h-8" />
+        </div>
+        <h1 className="text-xl font-bold">
+          {lang === 'vi' ? 'Đã tắt YouTube TV Receiver' : 'YouTube TV Receiver Closed'}
+        </h1>
+        <p className="text-slate-400 text-sm">
+          {lang === 'vi' ? 'Bạn có thể đóng cửa sổ trình duyệt này.' : 'You can safely close this browser window.'}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#07080c] text-slate-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
@@ -438,6 +616,14 @@ export default function App() {
             {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             <span className="hidden sm:inline">{isFullscreen ? t.exitFullscreenBtn : t.fullscreenBtn}</span>
           </button>
+          <button
+            onClick={handleQuitApp}
+            className="px-3 py-1.5 bg-slate-800 hover:bg-red-600 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-red-500 transition-all flex items-center gap-1.5"
+            title={t.quitAppTooltip}
+          >
+            <Power className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden sm:inline">{t.quitAppBtn}</span>
+          </button>
         </div>
       </header>
 
@@ -468,7 +654,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Top Quick Bar: QR Code Remote & Ma TV Dua Len Dau Trang (Tien loi khong can cuon chuot) */}
+        {/* Top Quick Bar: QR Code Remote & Ma TV Dua Len Dau Trang */}
         {!isFullscreen && (
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-[#0d101d] border border-slate-800/80 rounded-2xl p-4 shadow-xl">
             {/* Left: TV Pairing Code */}
@@ -479,7 +665,7 @@ export default function App() {
                   <span>{t.tvCodeHeader}</span>
                 </div>
                 <div className="text-2xl sm:text-3xl font-black font-mono text-white tracking-widest">
-                  {statusInfo.pairingCode || t.generatingCode}
+                  {statusInfo.pairingCode || t.refreshing}
                 </div>
                 <div className="text-[11px] text-slate-400">
                   {t.tvCodeSub}
@@ -487,7 +673,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right: QR Code for Remote (DUA LEN TREN DE TIEN QUET) */}
+            {/* Right: QR Code for Remote */}
             <div className="md:col-span-5 flex items-center justify-center md:justify-end gap-3.5 border-t md:border-t-0 md:border-l border-slate-800 pt-3 md:pt-0 md:pl-4">
               <div 
                 onClick={() => setShowQrModal(true)} 
@@ -530,9 +716,18 @@ export default function App() {
             />
           )}
 
-          {/* Real YouTube Player Embed (Khong dung dynamic key/src de giu iframe ton tai lau dai, giup Autoplay va phien ket noi luon on dinh) */}
+          {/* Real YouTube Player Embed with Two-Way JS API Bridge */}
           <iframe
-            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=1&controls=1&rel=0&modestbranding=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
+            ref={iframeRef}
+            id="yt-tv-iframe"
+            onLoad={() => {
+              activateYouTubeBridge();
+              setTimeout(() => {
+                activateYouTubeBridge();
+                sendIframeCommand('setVolume', [volumeRef.current]);
+              }, 500);
+            }}
+            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
             title={video.title}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
@@ -547,9 +742,9 @@ export default function App() {
             </span>
           </div>
 
-          {/* Fullscreen control overlay */}
+          {/* Fullscreen control overlay (Top Right) */}
           <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-            {/* TV Code badge when Fullscreen right next to QR icon */}
+            {/* TV Code badge right next to QR icon */}
             <div 
               onClick={() => setShowQrModal(true)}
               className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-2 text-xs shadow-lg cursor-pointer hover:border-amber-400/60"
@@ -599,9 +794,19 @@ export default function App() {
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4 text-red-400" /> : <Maximize2 className="w-4 h-4" />}
             </button>
+
+            {/* Nút Tắt App trực tiếp trên màn hình Fullscreen */}
+            <button
+              onClick={handleQuitApp}
+              className="px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white backdrop-blur-md border border-red-400/40 transition-all flex items-center gap-1.5 text-xs font-bold shadow-lg shadow-red-600/40"
+              title={t.quitAppTooltip}
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>{t.quitAppBtn}</span>
+            </button>
           </div>
 
-          {/* Floating exit fullscreen button */}
+          {/* Floating exit fullscreen button (Top Left when Fullscreen) */}
           {isFullscreen && (
             <button
               onClick={toggleFullscreen}
@@ -653,7 +858,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Official Google TV Code Box for Instant Fix */}
+              {/* Official Google TV Code Box */}
               <div className="p-4 rounded-2xl bg-gradient-to-r from-red-950/70 via-slate-900 to-[#121424] border border-red-500/50 space-y-2.5 shadow-xl">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -689,7 +894,7 @@ export default function App() {
                 </div>
 
                 <div className="text-2xl sm:text-3xl font-black font-mono text-white tracking-widest text-center py-2 bg-black/60 rounded-xl border border-white/10 shadow-inner">
-                  {statusInfo.pairingCode || t.generatingCode}
+                  {statusInfo.pairingCode || t.refreshing}
                 </div>
 
                 <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 space-y-1.5 text-slate-300 text-[11px] leading-relaxed">
@@ -728,7 +933,6 @@ export default function App() {
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-4">
-                {/* QR Code Container */}
                 <div className="bg-white p-2 rounded-2xl shadow-xl shrink-0 flex items-center justify-center">
                   {qrCodeUrl ? (
                     <img src={qrCodeUrl} alt="QR Code Remote" className="w-28 h-28 object-contain" />
@@ -827,7 +1031,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Modal Phong To QR Code Cho iPhone Remote (Dung duoc ca khi Toan man hinh) */}
+      {/* Modal Phong To QR Code Cho iPhone Remote */}
       {showQrModal && (
         <div 
           className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"

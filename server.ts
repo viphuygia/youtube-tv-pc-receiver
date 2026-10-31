@@ -2,6 +2,8 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
+import fs from 'fs';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import YouTubeCastReceiver, { Player, Constants } from 'yt-cast-receiver';
@@ -76,6 +78,7 @@ let currentVideo = {
   videoId: 'LXb3EKWsInQ', // Default 4K Nature relaxation
   title: 'Thiên Nhiên 4K Ultra HD',
   isPlaying: true,
+  startSeconds: 0,
   timestamp: Date.now(),
   source: 'Chế độ chờ (Standby)'
 };
@@ -83,9 +86,27 @@ let currentVideo = {
 let realPairingCode = '';
 const connectedClients = new Set<WebSocket>();
 
+// Biến theo dõi âm lượng, vị trí và thời lượng thực tế của video đang phát
+let currentVolumeLevel = 30; // Mặc định 30% khi khởi động
+let isVolumeMuted = false;
+let currentPositionSeconds = 0;
+let currentVideoDuration = 0; // Thời lượng thực của video (giây) đồng bộ từ YouTube IFrame Player
+let positionLastUpdated = Date.now();
+let isVideoPlaying = true;
+let lastSeekTimestamp = 0; // Chống nhảy ngược về 0s khi đang tua
+let lastExternalNotifyTime = 0;
+
+// Resolver chờ thời lượng thực từ trình phát khi bắt đầu video mới
+let pendingDurationResolver: ((dur: number) => void) | null = null;
+
 function broadcastVideo(videoData: typeof currentVideo) {
   currentVideo = videoData;
-  const message = JSON.stringify({ type: 'cast_video', video: currentVideo });
+  const message = JSON.stringify({
+    type: 'cast_video',
+    video: currentVideo,
+    volume: currentVolumeLevel,
+    isMuted: isVolumeMuted
+  });
   connectedClients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message);
@@ -124,98 +145,123 @@ function broadcastPairingCode(code: string) {
   });
 }
 
-// WebSocket connection for the TV screen and iPhone Remote
-wss.on('connection', (ws: WebSocket) => {
-  connectedClients.add(ws);
-  ws.send(JSON.stringify({ 
-    type: 'cast_video', 
-    video: currentVideo,
-    pairingCode: formatPairingCode(realPairingCode),
-    volume: currentVolumeLevel,
-    isMuted: isVolumeMuted
-  }));
+// Fetch tiêu đề video chạy ngầm không làm chậm luồng phát
+async function resolveVideoTitleAsync(videoId: string) {
+  try {
+    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+    if (oembedRes.ok) {
+      const oData = (await oembedRes.json()) as any;
+      if (oData?.title && currentVideo.videoId === videoId) {
+        currentVideo.title = oData.title;
+        broadcastControl({ action: 'updateTitle', videoId, title: oData.title });
+      }
+    }
+  } catch {}
+}
 
-  ws.on('message', (raw: Buffer | string) => {
+// ==========================================
+// PERSISTENT DATA STORE (.yt-cast-store.json)
+// Giữ nguyên screenId và deviceId qua các lần mở app để iPhone nhận diện tức thì ở lần bấm đầu tiên
+// ==========================================
+const STORE_FILE = path.resolve(__dirname, '.yt-cast-store.json');
+
+class PersistentDataStore {
+  map = new Map<string, any>();
+  constructor() {
     try {
-      const data = JSON.parse(raw.toString());
-      if (data.type === 'control') {
-        if (data.action === 'setVolume' && typeof data.value === 'number') {
-          currentVolumeLevel = Math.max(0, Math.min(100, Math.round(data.value)));
-          isVolumeMuted = false;
-        } else if (data.action === 'mute') {
-          isVolumeMuted = true;
-        } else if (data.action === 'unMute') {
-          isVolumeMuted = false;
-        }
-
-        // Forward control commands (togglePlay, play, pause, toggleMute, toggleFullscreen, seek, setVolume)
-        connectedClients.forEach(client => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(data));
-          }
-        });
-      } else if (data.type === 'cast') {
-        const vid = data.videoId;
-        if (vid) {
-          broadcastVideo({
-            videoId: vid,
-            title: data.title || `Video YouTube (${vid})`,
-            isPlaying: true,
-            timestamp: Date.now(),
-            source: 'iPhone Remote Control'
-          });
+      if (fs.existsSync(STORE_FILE)) {
+        const raw = fs.readFileSync(STORE_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        for (const [k, v] of Object.entries(parsed)) {
+          this.map.set(k, v);
         }
       }
     } catch {}
-  });
-
-  ws.on('close', () => {
-    connectedClients.delete(ws);
-  });
-});
-
-// ==========================================
-// OFFICIAL YOUTUBE CAST ENGINE (yt-cast-receiver)
-// Handles true Google Lounge connection, DIAL, and Link with TV code
-// ==========================================
-class MemoryDataStore {
-  map = new Map<string, any>();
-  async get(key: string) { return this.map.get(key); }
-  async set(key: string, val: any) { this.map.set(key, val); }
+  }
+  async get(key: string) {
+    return this.map.get(key);
+  }
+  async set(key: string, val: any) {
+    this.map.set(key, val);
+    try {
+      const obj: Record<string, any> = {};
+      this.map.forEach((v, k) => { obj[k] = v; });
+      fs.writeFileSync(STORE_FILE, JSON.stringify(obj, null, 2), 'utf8');
+    } catch {}
+  }
   setLogger() {}
 }
 
-// Biến theo dõi âm lượng, vị trí và thời gian phát video thực tế cho iPhone
-let currentVolumeLevel = 30; // Mặc định 30% khi khởi động theo yêu cầu của người dùng
-let isVolumeMuted = false;
-let currentPositionSeconds = 0;
-let positionLastUpdated = Date.now();
-let isVideoPlaying = true;
+// ==========================================
+// FAST PLAYLIST REQUEST HANDLER
+// Loại bỏ độ trễ 5-8s của Innertube.create() khi iPhone kết nối hoặc đổi bài
+// ==========================================
+class FastPlaylistRequestHandler {
+  logger: any = null;
+  setLogger(logger: any) {
+    this.logger = logger;
+  }
+  reset() {}
+  async getPreviousNextVideosAbortable(target: any, playlist: any, _abortSignal?: AbortSignal) {
+    return this.getPreviousNextVideos(target, playlist);
+  }
+  async getPreviousNextVideos(target: any, playlist: any) {
+    const ids: string[] = playlist?.videoIds || [];
+    const idx = target?.context?.index !== undefined ? Number(target.context.index) : ids.indexOf(target?.id);
+    const prevId = idx > 0 ? ids[idx - 1] : null;
+    const nextId = idx >= 0 && idx < ids.length - 1 ? ids[idx + 1] : null;
+    return {
+      previous: prevId ? { id: prevId, client: target.client, context: { playlistId: playlist.id, index: idx - 1 } } : null,
+      next: nextId ? { id: nextId, client: target.client, context: { playlistId: playlist.id, index: idx + 1 } } : null
+    };
+  }
+}
 
+// ==========================================
+// OFFICIAL YOUTUBE CAST PLAYER IMPLEMENTATION
+// ==========================================
 class WebCastPlayer extends Player {
   protected async doPlay(video: any, position: number): Promise<boolean> {
-    console.log(`[YouTube Cast Received from iPhone] Video ID: ${video.id}, Title: ${video.title || ''}, Position: ${position || 0}s`);
-    currentPositionSeconds = Number(position) || 0;
+    const startSec = Math.max(0, Math.floor(Number(position) || 0));
+    console.log(`[YouTube Cast Received from iPhone] Video ID: ${video.id}, Position: ${startSec}s`);
+    currentPositionSeconds = startSec;
     positionLastUpdated = Date.now();
+    lastSeekTimestamp = Date.now();
     isVideoPlaying = true;
 
-    let title = video.title;
-    if (!title) {
-      try {
-        const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${video.id}&format=json`);
-        if (oembedRes.ok) {
-          const oData = (await oembedRes.json()) as any;
-          if (oData.title) title = oData.title;
-        }
-      } catch {}
+    // Đặt lại thời lượng khi đổi sang video khác
+    if (currentVideo.videoId !== video.id) {
+      currentVideoDuration = 0;
     }
+
+    const initialTitle = video.title || `YouTube Video (${video.id})`;
     broadcastVideo({
       videoId: video.id,
-      title: title || `YouTube Video (${video.id})`,
+      title: initialTitle,
       isPlaying: true,
+      startSeconds: startSec,
       timestamp: Date.now(),
       source: 'iPhone YouTube App'
     });
+
+    if (!video.title) {
+      resolveVideoTitleAsync(video.id);
+    }
+
+    // Chờ tối đa 800ms để trình phát YouTube trên PC gửi về thời lượng thực (duration) của video
+    // Giúp thanh tua trên iPhone hiển thị đúng ngay lập tức khi bắt đầu phát
+    if (currentVideoDuration <= 0 && connectedClients.size > 0) {
+      await new Promise<number>((resolve) => {
+        pendingDurationResolver = resolve;
+        setTimeout(() => {
+          if (pendingDurationResolver === resolve) {
+            pendingDurationResolver = null;
+            resolve(currentVideoDuration);
+          }
+        }, 800);
+      });
+    }
+
     return true;
   }
 
@@ -240,17 +286,20 @@ class WebCastPlayer extends Player {
   protected async doStop(): Promise<boolean> {
     console.log('[YouTube Cast from iPhone] Stop/Transition command');
     isVideoPlaying = false;
-    currentPositionSeconds = 0;
-    // Không gửi lệnh pause khi đổi video để tránh làm gián đoạn chuyển bài
+    // Không gửi lệnh dừng cứng màn hình để việc vuốt xuống tìm video khác hoặc chuyển bài diễn ra mượt mà
     return true;
   }
 
   protected async doSeek(position: number): Promise<boolean> {
-    const target = Math.max(0, Math.floor(Number(position) || 0));
-    console.log(`[YouTube Cast Tua] iPhone yêu cầu tua tới: ${target}s`);
+    let target = Math.max(0, Math.floor(Number(position) || 0));
+    if (currentVideoDuration > 0 && target > currentVideoDuration) {
+      target = Math.max(0, currentVideoDuration - 1);
+    }
+    console.log(`[YouTube Cast Tua] iPhone yêu cầu tua tới: ${target}s (Duration: ${currentVideoDuration}s)`);
     currentPositionSeconds = target;
     positionLastUpdated = Date.now();
-    broadcastControl({ action: 'seek', value: target });
+    lastSeekTimestamp = Date.now();
+    broadcastControl({ action: 'seekTo', value: target });
     return true;
   }
 
@@ -261,7 +310,7 @@ class WebCastPlayer extends Player {
     if (volume.muted) {
       broadcastControl({ action: 'mute' });
     } else {
-      broadcastControl({ action: 'setVolume', value: volume.level });
+      broadcastControl({ action: 'setVolume', value: currentVolumeLevel });
     }
     return true;
   }
@@ -272,18 +321,101 @@ class WebCastPlayer extends Player {
 
   protected async doGetPosition(): Promise<number> {
     let current = currentPositionSeconds;
-    if (isVideoPlaying) {
+    if (isVideoPlaying && Date.now() - lastSeekTimestamp > 1200) {
       current += (Date.now() - positionLastUpdated) / 1000;
+    }
+    if (currentVideoDuration > 0 && current > currentVideoDuration) {
+      current = currentVideoDuration;
     }
     return Math.max(0, Math.floor(current));
   }
 
   protected async doGetDuration(): Promise<number> {
-    return 7200; // 2 giờ để iPhone luôn thoải mái kéo thanh tua
+    // Trả về chính xác thời lượng thực của video từ YouTube Player trên PC
+    return currentVideoDuration > 0 ? Math.round(currentVideoDuration) : 0;
   }
 }
 
 const ytPlayer = new WebCastPlayer();
+
+// Chuẩn hóa mọi bản tin setPlaylist / updatePlaylist từ iPhone để:
+// 1. Khi vuốt xuống tìm kiếm và chọn video đơn lẻ (không có listId hoặc currentIndex), video luôn tự phát ngay lập tức
+// 2. Không bao giờ bị xóa danh sách phát (playlistCleared) làm mất mini-player trên iPhone
+const origUpdateByMessage = ytPlayer.queue.updateByMessage.bind(ytPlayer.queue);
+ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
+  const p = message?.payload || {};
+  console.log(`[Lounge Queue Message] ${message?.name}:`, JSON.stringify(p));
+
+  let eventVideoId: string | undefined;
+  let eventType: string | undefined;
+  if (p.eventDetails) {
+    try {
+      const ed = typeof p.eventDetails === 'string' ? JSON.parse(p.eventDetails) : p.eventDetails;
+      eventVideoId = ed?.videoId;
+      eventType = ed?.eventType;
+    } catch {}
+  }
+
+  const videoIdsList = p.videoIds ? String(p.videoIds).split(',').filter(Boolean) : [];
+  const resolvedVideoId = p.videoId || eventVideoId || videoIdsList[0] || '';
+
+  if (message?.name === 'setPlaylist') {
+    if (resolvedVideoId) {
+      p.videoId = resolvedVideoId;
+      if (!p.videoIds) {
+        p.videoIds = resolvedVideoId;
+      } else if (!videoIdsList.includes(resolvedVideoId)) {
+        p.videoIds = [resolvedVideoId, ...videoIdsList].join(',');
+      }
+      if (!p.listId) {
+        p.listId = ytPlayer.queue.id || `PPSV_${resolvedVideoId}`;
+      }
+      const updatedList = String(p.videoIds).split(',').filter(Boolean);
+      if (p.currentIndex === undefined || p.currentIndex === null || p.currentIndex === '') {
+        const idx = updatedList.indexOf(resolvedVideoId);
+        p.currentIndex = String(idx >= 0 ? idx : 0);
+      }
+    } else if (!p.listId && ytPlayer.queue.current?.id) {
+      // Giữ lại video đang phát nếu iPhone gửi gói rỗng khi người dùng vuốt thu nhỏ
+      p.videoId = ytPlayer.queue.current.id;
+      p.videoIds = ytPlayer.queue.videoIds.length > 0 ? ytPlayer.queue.videoIds.join(',') : ytPlayer.queue.current.id;
+      p.listId = ytPlayer.queue.id || `PPSV_${ytPlayer.queue.current.id}`;
+      p.currentIndex = String(ytPlayer.queue.current.context?.index ?? 0);
+    }
+
+    // Đảm bảo YouTubeApp luôn nhận diện có sự thay đổi để gọi player.play() cho video được chọn
+    if (ytPlayer.queue.current?.context && resolvedVideoId) {
+      ytPlayer.queue.current.context.index = -999;
+    }
+  } else if (message?.name === 'updatePlaylist') {
+    if (!p.listId && (p.videoIds || resolvedVideoId || ytPlayer.queue.id)) {
+      p.listId = ytPlayer.queue.id || `PPSV_${resolvedVideoId || currentVideo.videoId}`;
+    }
+    if (!p.videoIds && resolvedVideoId) {
+      p.videoIds = resolvedVideoId;
+    }
+
+    // Nếu người dùng chọn phát một video mới trong danh sách chờ (VIDEO_SELECTED)
+    if (eventType === 'VIDEO_SELECTED' && eventVideoId) {
+      await origUpdateByMessage(message, client);
+      const updatedIds = ytPlayer.queue.videoIds;
+      const idx = updatedIds.indexOf(eventVideoId);
+      const selectedVideo = {
+        id: eventVideoId,
+        client,
+        context: {
+          playlistId: p.listId || ytPlayer.queue.id || `PPSV_${eventVideoId}`,
+          index: idx >= 0 ? idx : 0
+        }
+      };
+      await ytPlayer.play(selectedVideo, 0);
+      return;
+    }
+  }
+
+  return await origUpdateByMessage(message, client);
+};
+
 const ytReceiver = new YouTubeCastReceiver(ytPlayer, {
   device: {
     name: DEVICE_NAME,
@@ -294,12 +426,14 @@ const ytReceiver = new YouTubeCastReceiver(ytPlayer, {
     corsAllowOrigins: true,
     bindToAddresses: [localIp]
   },
-  dataStore: new MemoryDataStore(),
+  app: {
+    enableAutoplayOnConnect: true,
+    playlistRequestHandler: new FastPlaylistRequestHandler() as any,
+    resetPlayerOnDisconnectPolicy: Constants.RESET_PLAYER_ON_DISCONNECT_POLICIES.ALL_EXPLICITLY_DISCONNECTED
+  },
+  dataStore: new PersistentDataStore() as any,
   logLevel: 'warn'
 });
-
-// Giữ phiên Lounge không bị ngắt khi iPhone chuyển video (chỉ ngắt khi người dùng bấm ngắt kết nối rõ ràng)
-ytReceiver.setResetPlayerOnDisconnectPolicy(Constants.RESET_PLAYER_ON_DISCONNECT_POLICIES.ALL_EXPLICITLY_DISCONNECTED);
 
 ytReceiver.on('senderConnect', (sender: any) => {
   console.log(`[YouTube Cast] Connected to sender: ${sender?.name || 'iPhone'}`);
@@ -308,6 +442,134 @@ ytReceiver.on('senderConnect', (sender: any) => {
 
 ytReceiver.on('senderDisconnect', (sender: any) => {
   console.log(`[YouTube Cast] Disconnected from sender: ${sender?.name || 'iPhone'}`);
+});
+
+// WebSocket connection for the TV screen and iPhone Remote
+wss.on('connection', (ws: WebSocket) => {
+  connectedClients.add(ws);
+  ws.send(JSON.stringify({ 
+    type: 'cast_video', 
+    video: currentVideo,
+    pairingCode: formatPairingCode(realPairingCode),
+    volume: currentVolumeLevel,
+    isMuted: isVolumeMuted
+  }));
+
+  ws.on('message', (raw: Buffer | string) => {
+    try {
+      const data = JSON.parse(raw.toString());
+
+      // Đồng bộ thời gian thực (position, duration, playerState) từ YouTube IFrame Player trên PC gửi về
+      if (data.type === 'player_sync') {
+        if (data.videoId && data.videoId !== currentVideo.videoId) {
+          return;
+        }
+
+        let shouldNotifyLounge = false;
+
+        // Cập nhật thời lượng thực của video
+        if (typeof data.duration === 'number' && data.duration > 0) {
+          const roundedDur = Math.round(data.duration);
+          if (Math.abs(roundedDur - currentVideoDuration) >= 1) {
+            currentVideoDuration = roundedDur;
+            shouldNotifyLounge = true;
+            console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
+          }
+          if (pendingDurationResolver) {
+            const r = pendingDurationResolver;
+            pendingDurationResolver = null;
+            r(currentVideoDuration);
+          }
+        }
+
+        // Cập nhật vị trí giây thực tế (bỏ qua trong 1.5s đầu sau khi người dùng vừa bấm tua để tránh giật ngược)
+        if (typeof data.position === 'number' && data.position >= 0) {
+          if (Date.now() - lastSeekTimestamp > 1500) {
+            const prevPos = Math.floor(currentPositionSeconds);
+            currentPositionSeconds = data.position;
+            positionLastUpdated = Date.now();
+            if (Math.abs(Math.floor(data.position) - prevPos) >= 2) {
+              shouldNotifyLounge = true;
+            }
+          }
+        }
+
+        // Đồng bộ trạng thái Đang phát / Tạm dừng / Kết thúc từ trình phát YouTube
+        if (typeof data.playerState === 'number') {
+          if (data.playerState === 1 && !isVideoPlaying) {
+            isVideoPlaying = true;
+            positionLastUpdated = Date.now();
+            shouldNotifyLounge = true;
+          } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 1500) {
+            isVideoPlaying = false;
+            shouldNotifyLounge = true;
+          } else if (data.playerState === 0 && currentVideoDuration > 0 && currentPositionSeconds >= currentVideoDuration - 3) {
+            // Video kết thúc -> tự động chuyển bài tiếp theo trong hàng đợi
+            ytPlayer.next().catch(() => {});
+          }
+        }
+
+        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian chính xác
+        if (shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 800) {
+          lastExternalNotifyTime = Date.now();
+          const targetStatus = isVideoPlaying
+            ? Constants.PLAYER_STATUSES.PLAYING
+            : Constants.PLAYER_STATUSES.PAUSED;
+          if (ytPlayer.status === Constants.PLAYER_STATUSES.PLAYING || ytPlayer.status === Constants.PLAYER_STATUSES.PAUSED || ytPlayer.status === Constants.PLAYER_STATUSES.LOADING) {
+            ytPlayer.notifyExternalStateChange(targetStatus).catch(() => {});
+          }
+        }
+        return;
+      }
+
+      if (data.type === 'control') {
+        if (data.action === 'setVolume' && typeof data.value === 'number') {
+          currentVolumeLevel = Math.max(0, Math.min(100, Math.round(data.value)));
+          isVolumeMuted = false;
+        } else if (data.action === 'mute') {
+          isVolumeMuted = true;
+        } else if (data.action === 'unMute') {
+          isVolumeMuted = false;
+        } else if (data.action === 'seekRelative' && typeof data.value === 'number') {
+          let target = Math.max(0, Math.floor(currentPositionSeconds + data.value));
+          if (currentVideoDuration > 0 && target > currentVideoDuration) {
+            target = Math.max(0, currentVideoDuration - 1);
+          }
+          currentPositionSeconds = target;
+          positionLastUpdated = Date.now();
+          lastSeekTimestamp = Date.now();
+          data.action = 'seekTo';
+          data.value = target;
+        }
+
+        // Forward control commands to TV screen & remotes
+        connectedClients.forEach(client => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+          }
+        });
+      } else if (data.type === 'cast') {
+        const vid = data.videoId;
+        if (vid) {
+          currentVideoDuration = 0;
+          currentPositionSeconds = 0;
+          positionLastUpdated = Date.now();
+          broadcastVideo({
+            videoId: vid,
+            title: data.title || `Video YouTube (${vid})`,
+            isPlaying: true,
+            startSeconds: 0,
+            timestamp: Date.now(),
+            source: 'iPhone Remote Control'
+          });
+        }
+      }
+    } catch {}
+  });
+
+  ws.on('close', () => {
+    connectedClients.delete(ws);
+  });
 });
 
 const pairingService = ytReceiver.getPairingCodeRequestService();
@@ -377,10 +639,15 @@ app.post('/api/cast', async (req, res) => {
       } catch {}
     }
 
+    currentVideoDuration = 0;
+    currentPositionSeconds = 0;
+    positionLastUpdated = Date.now();
+
     broadcastVideo({
       videoId: targetId,
       title: resolvedTitle || `YouTube Video (${targetId})`,
       isPlaying: true,
+      startSeconds: 0,
       timestamp: Date.now(),
       source: body?.source || 'Cast từ Web / iPhone'
     });
@@ -399,6 +666,8 @@ app.get('/api/status', (req, res) => {
     rawPairingCode: realPairingCode,
     isLoungeConnected: (ytReceiver.status as string) === 'running',
     currentVideo,
+    position: Math.floor(currentPositionSeconds),
+    duration: currentVideoDuration,
     volume: currentVolumeLevel,
     isMuted: isVolumeMuted,
     connectedScreenClients: connectedClients.size
@@ -415,6 +684,28 @@ app.post('/api/refresh-code', async (req, res) => {
     success: true, 
     pairingCode: formatPairingCode(realPairingCode) 
   });
+});
+
+// Quit app endpoint (Đóng Kiosk TV & tắt máy chủ từ chế độ Fullscreen)
+app.post('/api/quit', async (req, res) => {
+  console.log('[System] Nhận lệnh Tắt ứng dụng từ màn hình Fullscreen...');
+  broadcastControl({ action: 'quit' });
+  res.json({ success: true });
+
+  setTimeout(() => {
+    // Đóng cửa sổ trình duyệt Kiosk được mở bởi start.bat (YouTubeTV_Profile) mà không ảnh hưởng trình duyệt cá nhân
+    if (process.platform === 'win32') {
+      exec(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`,
+        () => {
+          process.exit(0);
+        }
+      );
+      setTimeout(() => process.exit(0), 1500);
+    } else {
+      process.exit(0);
+    }
+  }, 300);
 });
 
 // ==========================================
