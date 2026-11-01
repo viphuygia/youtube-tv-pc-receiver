@@ -27,23 +27,28 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 
 ---
 
-### 🚀 1-Click Quick Start (Windows)
+### 🚀 Quick Start (Windows)
 
-#### Prerequisites:
-* **Operating System:** Windows 10 or Windows 11.
-* **Node.js:** v18 or later ([Download Node.js](https://nodejs.org/)).
-* **Browser:** Google Chrome or Microsoft Edge.
+#### Option 1: Standalone Windows Installer (Recommended for End-Users)
+> [!TIP]
+> **No Node.js or command line required!** The installer bundles an embedded portable Node.js runtime and native launcher.
+1. Download **`YouTube-TV-Receiver-Setup-v1.0.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) section.
+2. Run the installer and click **Next > Install**.
+3. Choose whether to create a Desktop icon and whether to **Auto-start on Windows boot**.
+4. Double-click the **YouTube TV Receiver** Desktop icon anytime to launch directly into Fullscreen Kiosk mode!
 
-#### Steps:
+#### Option 2: Run from Source / Developer Mode (`start.bat`)
 1. **Clone this repository:**
    ```bash
    git clone https://github.com/viphuygia/youtube-tv-pc-receiver.git
    cd youtube-tv-pc-receiver
    ```
+2. **Launch:** Double-click on **`start.bat`**.
+   * Requires Node.js v18+.
+   * Automatically installs dependencies on first run and opens in Kiosk mode.
 
-2. **Launch:**
-   * **Simply double-click on `start.bat`**.
-   * The script automatically installs dependencies (first run only), starts the backend server, waits for port `8547` to be ready, and opens the TV receiver in borderless fullscreen Kiosk mode on your preferred monitor with full autoplay permissions.
+#### 📦 Building the Installer Yourself:
+Simply double-click **`build-installer.bat`**. It compiles the React frontend, bundles the backend, builds the C# native launcher, and generates `dist-installer\YouTube-TV-Receiver-Setup-v1.0.0.exe` using Inno Setup.
 
 ---
 
@@ -94,23 +99,26 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
 
 ---
 
-### 🚀 Cài Đặt & Khởi Chạy (1-Click)
+### 🚀 Cài Đặt & Khởi Chạy (Windows)
 
-#### Yêu cầu hệ thống:
-* **Hệ điều hành:** Windows 10 hoặc Windows 11.
-* **Node.js:** Phiên bản 18 trở lên (Tải tại [nodejs.org](https://nodejs.org/)).
-* **Trình duyệt:** Google Chrome hoặc Microsoft Edge.
+#### Cách 1: Tải bộ cài đặt 1-Click (Khuyên dùng cho người dùng cuối)
+> [!TIP]
+> **Không cần cài đặt Node.js hay mở dòng lệnh!** Bộ cài đặt đã nhúng sẵn Node.js portable và launcher native siêu nhẹ.
+1. Tải file **`YouTube-TV-Receiver-Setup-v1.0.0.exe`** từ mục [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases).
+2. Chạy file cài đặt, bấm **Next ➔ Install**.
+3. Bạn có thể tick chọn **Tạo biểu tượng ngoài Desktop** và **Khởi động cùng Windows khi bật máy**.
+4. Nhấp đúp vào icon **YouTube TV Receiver** ngoài Desktop để mở TV xem ngay!
 
-#### Các bước thực hiện:
+#### Cách 2: Chạy trực tiếp từ mã nguồn (`start.bat`)
 1. **Tải mã nguồn về máy:**
    ```bash
    git clone https://github.com/viphuygia/youtube-tv-pc-receiver.git
    cd youtube-tv-pc-receiver
    ```
+2. **Khởi chạy ứng dụng:** Nhấp đúp chuột vào file **`start.bat`** (yêu cầu máy có sẵn Node.js v18+).
 
-2. **Khởi chạy ứng dụng:**
-   * **Chỉ cần nhấp đúp chuột vào file `start.bat`**.
-   * File sẽ tự động cài đặt thư viện cần thiết (ở lần chạy đầu tiên), khởi động máy chủ, chờ cổng `8547` sẵn sàng rồi tự mở màn hình TV tràn viền trên đúng màn hình bạn đã chọn lưu.
+#### 📦 Tự đóng gói file cài đặt Setup.exe:
+Chỉ cần nhấp đúp file **`build-installer.bat`**, hệ thống sẽ tự build frontend, bundle server và tạo ra file cài đặt `dist-installer\YouTube-TV-Receiver-Setup-v1.0.0.exe` thông qua Inno Setup.
 
 ---
 

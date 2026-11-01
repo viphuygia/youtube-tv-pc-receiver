@@ -13,6 +13,11 @@ coverage/
 .antigravity/
 .vscode/
 
+# Installer & build staging
+build-staging/
+dist-installer/
+dist-server/
+
 # Temp test files
 test-*.mjs
 inspect-*.mjs

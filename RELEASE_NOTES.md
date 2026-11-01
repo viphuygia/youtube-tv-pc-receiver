@@ -8,6 +8,7 @@
 
 ### Highlights in v1.0.0
 
+- **1-Click Windows Setup Installer (`Setup.exe`):** Bundles an embedded portable Node.js runtime, native launcher (`YouTubeTV.exe`), desktop & start menu shortcuts, and auto-start on boot capability into a compact ~29MB installer. End-users do not need to install Node.js or run any terminal commands.
 - **Dynamic Device Naming:** Broadcasts as `Youtube TV ({hostname})` (e.g. `Youtube TV (DESKTOP-50DM79B)`), allowing seamless recognition and management across multiple PCs on the same LAN/Wi-Fi network.
 - **True 1:1 Video Duration & Timeline Sync:** Two-way YouTube IFrame API bridge (`infoDelivery` + `player_sync`) continuously synchronizes exact video length and playback timestamp with your phone. Scrubbing and `+/- 10s` seeking work reliably without jumping back to 0s.
 - **Seamless Video Switching & Mini-Player Swiping:** Swipe down to search and select new videos on iPhone/Android without losing connection or clearing the queue, backed by a non-blocking `FastPlaylistRequestHandler` (0ms) and persistent ID storage (`.yt-cast-store.json`).
@@ -24,6 +25,7 @@
 
 ### Các điểm nổi bật trong phiên bản chính thức v1.0.0
 
+- **Bộ cài đặt 1-Click độc lập (`Setup.exe`):** Đóng gói sẵn Node.js portable, launcher native (`YouTubeTV.exe`), icon ngoài Desktop, Start Menu và tùy chọn tự khởi động cùng Windows thành 1 file cài đặt duy nhất (~29MB). Người dùng cuối tải về nhấp cài đặt là dùng ngay, hoàn toàn không cần cài đặt Node.js hay gõ lệnh.
 - **Tên thiết bị động theo máy:** Tự động nhận diện `Youtube TV ({hostname})` (ví dụ: `Youtube TV (DESKTOP-50DM79B)`), giúp phân biệt dễ dàng khi bạn cài đặt trên nhiều máy tính trong cùng mạng gia đình hoặc văn phòng.
 - **Đồng bộ thời gian thực 1:1 (Duration & Seek):** Cầu nối 2 chiều giữa YouTube Player và server (`player_sync`) đồng bộ chính xác tổng thời lượng video và giây đang phát lên thanh trượt điện thoại. Khắc phục dứt điểm lỗi video 30p bị kéo lên 2 tiếng và lỗi tua `+10s` bị giật ngược về 0s.
 - **Chuyển video & Vuốt tìm kiếm mượt mà:** Người dùng có thể thoải mái vuốt thu nhỏ video trên app YouTube của iPhone/Android để tìm kiếm và chọn video khác mà không bị ngắt kết nối hay mất danh sách chờ nhờ `FastPlaylistRequestHandler` và bộ lưu trữ định danh bền vững `.yt-cast-store.json`.
