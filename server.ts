@@ -173,17 +173,27 @@ async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
   await minimizeKioskWindow();
 }
 
-let disconnectStandbyTimer: NodeJS.Timeout | null = null;
+// Bộ đếm nhận diện phím tắt: Bấm Play/Pause (hoặc Start/Stop) 5 lần trong vòng 5 giây từ iPhone để ẩn TV
+let playPauseTriggerTimestamps: number[] = [];
 
-function cancelDisconnectTimer() {
-  if (disconnectStandbyTimer) {
-    clearTimeout(disconnectStandbyTimer);
-    disconnectStandbyTimer = null;
+function registerPlayPauseTrigger(source: string = 'điện thoại'): boolean {
+  const now = Date.now();
+  // Lọc chỉ giữ lại các lần bấm trong vòng 5 giây qua
+  playPauseTriggerTimestamps = playPauseTriggerTimestamps.filter(t => now - t <= 5000);
+  playPauseTriggerTimestamps.push(now);
+  console.log(`[Trigger Phím Tắt Ẩn TV] Nhận lệnh Play/Pause (${playPauseTriggerTimestamps.length}/5 lần trong 5s) [Nguồn: ${source}]`);
+
+  if (playPauseTriggerTimestamps.length >= 5) {
+    playPauseTriggerTimestamps = [];
+    console.log(`[Trigger Phím Tắt Ẩn TV] ĐÃ NHẬN ĐỦ 5 LẦN BẤM PLAY/PAUSE TRONG 5S! KÍCH HOẠT CHẾ ĐỘ ẨN TV.`);
+    enterStandbyMode('Phím tắt: Bấm Play/Pause 5 lần trong 5s từ điện thoại');
+    return true;
   }
+  return false;
 }
 
 async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu phát') {
-  cancelDisconnectTimer();
+  playPauseTriggerTimestamps = [];
   console.log(`[YouTube Cast Standby] Thoát Chế độ chờ -> Hiện ứng dụng [Lý do: ${reason}].`);
   isStandby = false;
   broadcastStandbyState(false);
@@ -317,7 +327,6 @@ class FastPlaylistRequestHandler {
 // ==========================================
 class WebCastPlayer extends Player {
   protected async doPlay(video: any, position: number): Promise<boolean> {
-    cancelDisconnectTimer();
     const startSec = Math.max(0, Math.floor(Number(position) || 0));
     console.log(`[YouTube Cast Received from iPhone] Video ID: ${video.id}, Position: ${startSec}s`);
 
@@ -374,6 +383,7 @@ class WebCastPlayer extends Player {
       isVideoPlaying = false;
     }
     broadcastControl({ action: 'pause' });
+    registerPlayPauseTrigger('iPhone doPause');
     return true;
   }
 
@@ -382,6 +392,7 @@ class WebCastPlayer extends Player {
     positionLastUpdated = Date.now();
     isVideoPlaying = true;
     broadcastControl({ action: 'play' });
+    registerPlayPauseTrigger('iPhone doResume');
     return true;
   }
 
@@ -606,7 +617,6 @@ foreach ($p in $procs) {
 // 2. Không bao giờ bị xóa danh sách phát (playlistCleared) làm mất mini-player trên iPhone
 const origUpdateByMessage = ytPlayer.queue.updateByMessage.bind(ytPlayer.queue);
 ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
-  cancelDisconnectTimer();
   const p = message?.payload || {};
   console.log(`[Lounge Queue Message] ${message?.name}:`, JSON.stringify(p));
 
@@ -726,7 +736,6 @@ detectDisplays().then(() => getTargetDisplay()).then((target) => {
 }).catch(() => {});
 
 ytReceiver.on('senderConnect', (sender: any) => {
-  cancelDisconnectTimer();
   console.log(`[YouTube Cast] Connected to sender: ${sender?.name || 'iPhone'}`);
   broadcastControl({ action: 'senderConnected', senderName: sender?.name });
 });
@@ -734,25 +743,8 @@ ytReceiver.on('senderConnect', (sender: any) => {
 ytReceiver.on('senderDisconnect', (sender: any, implicit?: boolean) => {
   const senderName = sender?.name || 'Thiết bị';
   console.log(`[YouTube Cast] Sender disconnected: ${senderName} (implicit: ${implicit})`);
-
-  // Bỏ qua các lần ngắt kết nối ngầm (implicit) khi đổi bài hoặc đổi tab
-  if (implicit) {
-    console.log('[YouTube Cast] Bỏ qua implicit disconnect khi đang chuyển video/mạng.');
-    return;
-  }
-
-  cancelDisconnectTimer();
-
-  // Chờ 2.5s:
-  // - Nếu người dùng chỉ đang đổi video, khi video mới tới sẽ cancel timer ngay
-  // - Nếu người dùng thực sự bấm "Ngắt kết nối" (Disconnect) trên app YouTube, sau 2.5s TV sẽ tự động thu nhỏ và ẩn xuống Taskbar!
-  disconnectStandbyTimer = setTimeout(async () => {
-    const remainingSenders = ytReceiver.getConnectedSenders ? ytReceiver.getConnectedSenders() : [];
-    if (!remainingSenders || remainingSenders.length === 0) {
-      console.log(`[YouTube Cast] Người dùng đã bấm "Ngắt kết nối" trên app YouTube điện thoại -> Tự động ẩn cửa sổ TV xuống Taskbar.`);
-      await enterStandbyMode(`Bấm "Ngắt kết nối" từ app YouTube (${senderName})`);
-    }
-  }, 2500);
+  // GIỮ NGUYÊN VIDEO ĐANG CHẠY: Rớt connect vẫn cho phép video tiếp tục chạy bình thường trên TV!
+  // Tuyệt đối không dừng video và không ẩn TV khi mất kết nối từ điện thoại.
 });
 
 // WebSocket connection for the TV screen and iPhone Remote
@@ -850,6 +842,10 @@ wss.on('connection', (ws: WebSocket) => {
       }
 
       if (data.type === 'control') {
+        if (data.action === 'play' || data.action === 'pause') {
+          registerPlayPauseTrigger('Remote / Web');
+        }
+
         if (data.action === 'setVolume' && typeof data.value === 'number') {
           currentVolumeLevel = Math.max(0, Math.min(100, Math.round(data.value)));
           isVolumeMuted = false;

@@ -67,7 +67,7 @@ export const translations = {
     standbyWakeSampleBtn: "▶️ Phát video mẫu",
     standbyEnterBtn: "Ẩn vào Chế độ chờ",
     standbyActiveBadge: "TV Đang ở Chế độ chờ",
-    standbyReadySub: "Video đã dừng hoàn toàn · Sẵn sàng tự động bật khi điện thoại kết nối",
+    standbyReadySub: "Video đã dừng hoàn toàn · Không tốn mạng · Bấm Play/Pause 5 lần trong 5s trên điện thoại để ẩn TV",
     footerText: "YouTube Cast Receiver Lite cho máy tính Windows · Hỗ trợ DIAL & SSDP Multicast trên cùng mạng Wi-Fi"
   },
   en: {
@@ -136,7 +136,7 @@ export const translations = {
     standbyWakeSampleBtn: "▶️ Play Sample Video",
     standbyEnterBtn: "Hide to Standby",
     standbyActiveBadge: "TV is in Standby Mode",
-    standbyReadySub: "Video playback paused & stopped · Will auto-start full screen when phone connects",
+    standbyReadySub: "Video stopped · Zero bandwidth · Press Play/Pause 5x in 5s on phone to hide TV",
     footerText: "YouTube Cast Receiver Lite for Windows PC · Supports DIAL & SSDP Multicast over local Wi-Fi"
   }
 };
