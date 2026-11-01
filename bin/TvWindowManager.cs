@@ -41,6 +41,9 @@ public class TvWindowManager {
   public static extern bool IsWindowVisible(IntPtr hWnd);
 
   [DllImport("user32.dll")]
+  public static extern bool IsIconic(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
   [DllImport("user32.dll")]
@@ -137,7 +140,13 @@ public class TvWindowManager {
           GetClassName(hWnd, sbCls, 256);
           string cls = sbCls.ToString();
 
-          if (cls == "CabinetWClass" || cls == "Progman" || cls == "Shell_TrayWnd") {
+          // CHỈ bắt cửa sổ trình duyệt thực sự (Chrome_WidgetWin_1).
+          // Tuyệt đối bỏ qua các cửa sổ ngầm của Chrome như Default IME, MSCTFIME UI, GDI+ Window, Chrome_WidgetWin_0 (nguyên nhân gây đen màn hình).
+          if (cls != "Chrome_WidgetWin_1") {
+            return true;
+          }
+
+          if (!IsWindowVisible(hWnd) && !IsIconic(hWnd)) {
             return true;
           }
 
@@ -147,7 +156,10 @@ public class TvWindowManager {
 
           if (string.IsNullOrEmpty(title)) return true;
 
-          if (title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0 || 
+          if (title.Equals("Default IME", StringComparison.OrdinalIgnoreCase) ||
+              title.Equals("MSCTFIME UI", StringComparison.OrdinalIgnoreCase) ||
+              title.IndexOf("GDI+ Window", StringComparison.OrdinalIgnoreCase) >= 0 ||
+              title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0 || 
               title.IndexOf("Visual Studio", StringComparison.OrdinalIgnoreCase) >= 0 ||
               title.IndexOf("Command Prompt", StringComparison.OrdinalIgnoreCase) >= 0 ||
               title.IndexOf("PowerShell", StringComparison.OrdinalIgnoreCase) >= 0) {
@@ -159,7 +171,7 @@ public class TvWindowManager {
 
           bool match = false;
           if (profilePids.Count > 0) {
-            // Khi có profile YouTubeTV_Profile đang chạy, chỉ bắt chính xác cửa sổ của profile này
+            // Khi có profile YouTubeTV_Profile đang chạy, chỉ bắt chính xác cửa sổ Chrome_WidgetWin_1 của profile này
             match = profilePids.Contains(winPid);
           } else {
             // Khi không tìm thấy profile, chỉ khớp tiêu đề chính xác của ứng dụng TV
@@ -191,6 +203,10 @@ public class TvWindowManager {
           if (pName == "chrome" || pName == "msedge") {
             IntPtr h = proc.MainWindowHandle;
             if (h != IntPtr.Zero && !list.Contains(h)) {
+              StringBuilder sbCls = new StringBuilder(256);
+              GetClassName(h, sbCls, 256);
+              if (sbCls.ToString() != "Chrome_WidgetWin_1") continue;
+
               uint pId = (uint)proc.Id;
               bool match = false;
               if (profilePids.Count > 0) {
@@ -226,15 +242,19 @@ public class TvWindowManager {
   public static void BringToFront(IntPtr hWnd, int x, int y, int w, int h) {
     if (hWnd == IntPtr.Zero) return;
 
-    // 1. Khôi phục từ trạng thái thu nhỏ và phóng to toàn màn hình
-    ShowWindow(hWnd, 9); // SW_RESTORE
-    ShowWindow(hWnd, 3); // SW_MAXIMIZE
+    // 1. Chỉ gọi SW_RESTORE (9) khi cửa sổ thực sự đang bị thu nhỏ (IsIconic) dưới Taskbar.
+    // Tránh gọi SW_RESTORE lên cửa sổ đang mở sẵn vì sẽ phá vỡ chế độ --start-fullscreen và gây đen màn hình.
+    if (IsIconic(hWnd)) {
+      ShowWindow(hWnd, 9); // SW_RESTORE
+    } else {
+      ShowWindow(hWnd, 5); // SW_SHOW
+    }
 
     // 2. Chuyển sang đúng tab YouTube TV nếu người dùng mở trong cửa sổ đa tab
     FocusExactTab(hWnd);
 
-    // 3. Khóa cờ HWND_TOPMOST (-1) bao phủ toàn màn hình che mọi app khác
-    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040 | 0x0020);
+    // 3. Đưa cửa sổ lên đỉnh Z-Order (HWND_TOPMOST = -1) với SWP_SHOWWINDOW (0x0040), không dùng SWP_FRAMECHANGED (0x0020)
+    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
 
     // 4. Đồng bộ tiêu điểm bàn phím & chuột bằng AttachThreadInput (không dùng phím Alt giả lập)
     try {
@@ -259,9 +279,10 @@ public class TvWindowManager {
       SwitchToThisWindow(hWnd, false);
     } catch {}
 
-    // 6. Củng cố cờ HWND_TOPMOST (-1) để đảm bảo cửa sổ luôn ở đỉnh
+    // 6. Chuyển từ HWND_TOPMOST (-1) về HWND_NOTOPMOST (-2) sau khi đã chiếm đỉnh Z-Order
+    // Giúp cửa sổ vẫn đè lên trên mọi ứng dụng khác nhưng không làm kẹt DirectComposition/DWM (tránh lỗi full đen màn hình)
     try {
-      SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
+      SetWindowPos(hWnd, new IntPtr(-2), x, y, w, h, 0x0040 | 0x0001 | 0x0002);
     } catch {}
   }
 

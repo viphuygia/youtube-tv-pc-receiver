@@ -85,6 +85,7 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isStandbyRef = useRef<boolean>(isStandby);
   const currentVideoIdRef = useRef<string>(video.videoId);
   const volumeRef = useRef<number>(volume);
   const isMutedRef = useRef<boolean>(isMuted);
@@ -93,6 +94,10 @@ export default function App() {
   const playerStateRef = useRef<number>(-1);
   const lastSyncSentRef = useRef<number>(0);
   const hasConnectedWsOnceRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isStandbyRef.current = isStandby;
+  }, [isStandby]);
 
   useEffect(() => {
     currentVideoIdRef.current = video.videoId;
@@ -481,19 +486,23 @@ export default function App() {
 
             if (data.type === 'cast_video') {
               try { window.focus(); } catch {}
-              if (data.isStandby !== undefined) {
-                setIsStandby(Boolean(data.isStandby));
-              } else if (data.video?.videoId) {
-                setIsStandby(false);
-              }
+              const incomingStandby = data.isStandby !== undefined ? Boolean(data.isStandby) : !Boolean(data.video?.videoId);
 
               if (typeof data.pairingCode === 'string' && data.pairingCode) {
                 setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
               }
 
-              if (data.video?.videoId) {
+              if (incomingStandby) {
+                isStandbyRef.current = true;
+                setIsStandby(true);
+                sendIframeCommand('stopVideo', []);
+                if (data.video) {
+                  setVideo({ ...data.video, isPlaying: false });
+                }
+              } else if (data.video?.videoId) {
                 const incomingVid = data.video.videoId;
                 const startSec = Number(data.video.startSeconds) || 0;
+                isStandbyRef.current = false;
                 setIsStandby(false);
                 currentVideoIdRef.current = incomingVid;
                 setVideo(data.video);
@@ -503,6 +512,7 @@ export default function App() {
                 activateYouTubeBridge();
                 sendIframeCommand('loadVideoById', [incomingVid, startSec]);
                 setTimeout(() => {
+                  activateYouTubeBridge();
                   sendIframeCommand('playVideo', []);
                   sendIframeCommand('setVolume', [volumeRef.current]);
                   if (isMutedRef.current) {
@@ -924,8 +934,32 @@ export default function App() {
             />
           )}
 
+          {/* Real YouTube Player Embed with Two-Way JS API Bridge (Luôn được giữ cố định trong DOM để cầu nối IFrame API & tua video mượt mà 100% như v1.0.0) */}
+          <iframe
+            ref={iframeRef}
+            id="yt-tv-iframe"
+            onLoad={() => {
+              activateYouTubeBridge();
+              setTimeout(() => {
+                activateYouTubeBridge();
+                sendIframeCommand('setVolume', [volumeRef.current]);
+                if (!isStandbyRef.current && currentVideoIdRef.current) {
+                  sendIframeCommand('loadVideoById', [currentVideoIdRef.current, playerTimeRef.current || 0]);
+                  sendIframeCommand('playVideo', []);
+                } else {
+                  sendIframeCommand('stopVideo', []);
+                }
+              }, 400);
+            }}
+            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
+            title={video.title}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            className={`w-full h-full border-0 select-none relative z-10 transition-opacity duration-200 ${isStandby ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          />
+
           {isStandby ? (
-            <div className="relative w-full h-full flex flex-col justify-between p-4 sm:p-8 md:p-12 z-10 bg-gradient-to-br from-[#080a14] via-[#040509] to-[#0a0d1a] text-white select-none">
+            <div className="absolute inset-0 w-full h-full flex flex-col justify-between p-4 sm:p-8 md:p-12 z-30 bg-gradient-to-br from-[#080a14] via-[#040509] to-[#0a0d1a] text-white select-none">
               {/* Soft ambient glow */}
               <div aria-hidden="true" className="absolute inset-0 pointer-events-none opacity-25 blur-3xl bg-radial from-red-600/30 via-indigo-600/20 to-transparent" />
 
@@ -1078,24 +1112,6 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* Real YouTube Player Embed with Two-Way JS API Bridge */}
-              <iframe
-                ref={iframeRef}
-                id="yt-tv-iframe"
-                onLoad={() => {
-                  activateYouTubeBridge();
-                  setTimeout(() => {
-                    activateYouTubeBridge();
-                    sendIframeCommand('setVolume', [volumeRef.current]);
-                  }, 500);
-                }}
-                src={`https://www.youtube.com/embed/${video.videoId || initialVideoId}?autoplay=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
-                title={video.title}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-                className="w-full h-full border-0 select-none relative z-10"
-              />
-
               {/* Floating Source Tag Badge */}
               <div className="absolute top-4 left-4 z-20 pointer-events-none flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 text-xs">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />

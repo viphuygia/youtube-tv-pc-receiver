@@ -210,7 +210,7 @@ public class Win32TvMinimizer {
 
         bool matchPid = pidSet.Contains((int)pid);
         bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
-        bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+        bool matchCls = (cls == "Chrome_WidgetWin_1");
 
         if ((matchPid && matchCls) || (matchTitle && matchCls)) {
           if (!list.Contains(hWnd)) list.Add(hWnd);
@@ -231,7 +231,7 @@ public class Win32TvMinimizer {
 
       bool matchPid = pidSet.Contains((int)pid);
       bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
-      bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+      bool matchCls = (cls == "Chrome_WidgetWin_1");
 
       if ((matchPid && matchCls) || (matchTitle && matchCls)) {
         if (!list.Contains(hWnd)) list.Add(hWnd);
@@ -568,17 +568,8 @@ class WebCastPlayer extends Player {
     return true;
   }
 
-  private lastPauseTimestamp = 0;
   protected async doPause(): Promise<boolean> {
     console.log('[YouTube Cast from iPhone] Pause command');
-    const now = Date.now();
-    // Cử chỉ bấm Tạm dừng 2 lần liên tiếp trong vòng 3 giây -> Kích hoạt Chế độ ẩn TV ngay lập tức
-    if (now - this.lastPauseTimestamp < 3000) {
-      console.log('[YouTube Cast Cử chỉ] Bấm Tạm dừng (Pause) 2 lần liên tiếp -> Kích hoạt Chế độ ẩn TV');
-      enterStandbyMode('Bấm Tạm dừng (Pause) 2 lần liên tiếp từ iPhone');
-    }
-    this.lastPauseTimestamp = now;
-
     if (isVideoPlaying) {
       currentPositionSeconds += (Date.now() - positionLastUpdated) / 1000;
       isVideoPlaying = false;
@@ -592,8 +583,6 @@ class WebCastPlayer extends Player {
     cancelAutoStandby();
     if (isStandby) {
       exitStandbyMode('iPhone Resume').catch(() => {});
-    } else {
-      restoreKioskWindow().catch(() => {});
     }
     positionLastUpdated = Date.now();
     isVideoPlaying = true;
@@ -611,13 +600,8 @@ class WebCastPlayer extends Player {
   protected async doSeek(position: number): Promise<boolean> {
     let target = Math.max(0, Math.floor(Number(position) || 0));
     cancelAutoStandby();
-    // Workaround Cử chỉ: Nếu người dùng tua thanh thời gian về cuối video (hết bài) từ YouTube app -> Tự động ẩn TV
-    if (currentVideoDuration > 0 && target >= currentVideoDuration - 2) {
-      console.log(`[YouTube Cast Tua Hết Video] iPhone tua đến cuối video (${target}s / ${currentVideoDuration}s). Kích hoạt Chế độ ẩn TV.`);
-      target = Math.max(0, currentVideoDuration - 1);
-      setTimeout(() => {
-        enterStandbyMode('Người dùng tua đến cuối video từ iPhone');
-      }, 500);
+    if (currentVideoDuration > 0 && target > currentVideoDuration) {
+      target = currentVideoDuration;
     }
     console.log(`[YouTube Cast Tua] iPhone yêu cầu tua tới: ${target}s (Duration: ${currentVideoDuration}s)`);
     currentPositionSeconds = target;
@@ -891,6 +875,9 @@ public class Win32TvForegrounder {
   public static extern bool IsWindowVisible(IntPtr hWnd);
 
   [DllImport("user32.dll")]
+  public static extern bool IsIconic(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
   [DllImport("user32.dll")]
@@ -936,7 +923,7 @@ public class Win32TvForegrounder {
 
         bool matchPid = pidSet.Contains((int)pid);
         bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
-        bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+        bool matchCls = (cls == "Chrome_WidgetWin_1");
 
         if ((matchPid && matchCls) || (matchTitle && matchCls)) {
           if (!list.Contains(hWnd)) list.Add(hWnd);
@@ -957,7 +944,7 @@ public class Win32TvForegrounder {
 
       bool matchPid = pidSet.Contains((int)pid);
       bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
-      bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+      bool matchCls = (cls == "Chrome_WidgetWin_1");
 
       if ((matchPid && matchCls) || (matchTitle && matchCls)) {
         if (!list.Contains(hWnd)) list.Add(hWnd);
@@ -971,13 +958,15 @@ public class Win32TvForegrounder {
   public static void BringToFront(IntPtr hWnd, int x, int y, int w, int h) {
     if (hWnd == IntPtr.Zero) return;
 
-    // 1. Khôi phục từ trạng thái thu nhỏ hoặc ẩn và phóng to toàn màn hình
-    ShowWindow(hWnd, 9); // SW_RESTORE
-    ShowWindow(hWnd, 3); // SW_MAXIMIZE
+    // 1. Chỉ gọi SW_RESTORE (9) khi cửa sổ thực sự đang bị thu nhỏ dưới Taskbar (IsIconic)
+    if (IsIconic(hWnd)) {
+      ShowWindow(hWnd, 9); // SW_RESTORE
+    } else {
+      ShowWindow(hWnd, 5); // SW_SHOW
+    }
 
-    // 2. Định vị tọa độ và kích thước trên màn hình đã chọn
-    // HWND_TOPMOST (-1), SWP_SHOWWINDOW (0x0040) | SWP_FRAMECHANGED (0x0020) -> kéo lên trên cùng danh sách Z-order che mọi app
-    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040 | 0x0020);
+    // 2. Đưa lên đỉnh Z-order (HWND_TOPMOST = -1), không dùng SWP_FRAMECHANGED
+    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
 
     // 3. Vượt qua cơ chế chặn chiếm tiêu điểm (Focus Stealing Prevention) của Windows bằng AttachThreadInput
     try {
@@ -997,14 +986,14 @@ public class Win32TvForegrounder {
       BringWindowToTop(hWnd);
     } catch {}
 
-    // 4. SwitchToThisWindow: Lệnh chuyển tác vụ cấp hệ thống để đưa ngay cửa sổ lên đầu màn hình
+    // 4. SwitchToThisWindow không dùng hiệu ứng Alt-Tab
     try {
-      SwitchToThisWindow(hWnd, true);
+      SwitchToThisWindow(hWnd, false);
     } catch {}
 
-    // 5. Củng cố lại cờ HWND_TOPMOST (-1) để đảm bảo cửa sổ luôn ở trên đỉnh và che mọi app
+    // 5. Giải phóng về HWND_NOTOPMOST (-2) sau khi đã chiếm đỉnh để tránh lỗi full đen màn hình của DWM
     try {
-      SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
+      SetWindowPos(hWnd, new IntPtr(-2), x, y, w, h, 0x0040 | 0x0001 | 0x0002);
     } catch {}
   }
 }
@@ -1081,9 +1070,9 @@ ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
 
     const res = await origUpdateByMessage(message, client);
 
-    // Đảm bảo video mới luôn được phát trên TV ngay cả khi YouTubeApp nội bộ không tự gọi play()
-    if (resolvedVideoId && currentVideo.videoId !== resolvedVideoId) {
-      console.log(`[Queue Fallback] Chủ động kích hoạt phát video mới: ${resolvedVideoId}`);
+    // Chỉ dùng fallback nếu origUpdateByMessage không gán được queue.current (tránh gọi play() 2 lần gây lỗi tua video)
+    if (resolvedVideoId && !ytPlayer.queue.current) {
+      console.log(`[Queue Fallback] queue.current trống, chủ động kích hoạt phát video mới: ${resolvedVideoId}`);
       const updatedIds = ytPlayer.queue.videoIds;
       const idx = updatedIds.indexOf(resolvedVideoId);
       const newTarget = {
@@ -1181,10 +1170,12 @@ wss.on('connection', (ws: WebSocket) => {
     isMuted: isVolumeMuted
   }));
 
-  // Đảm bảo cửa sổ Kiosk tự động di chuyển đúng sang màn hình đã lưu khi vừa mở
-  getTargetDisplay().then((target) => {
-    moveKioskWindowToDisplay(target).catch(() => {});
-  }).catch(() => {});
+  // Đảm bảo cửa sổ Kiosk tự động di chuyển đúng sang màn hình đã lưu khi vừa mở (nếu đang không ở chế độ ẩn)
+  if (!isStandby) {
+    getTargetDisplay().then((target) => {
+      moveKioskWindowToDisplay(target).catch(() => {});
+    }).catch(() => {});
+  }
 
   ws.on('message', async (raw: Buffer | string) => {
     try {
@@ -1197,6 +1188,7 @@ wss.on('connection', (ws: WebSocket) => {
         }
 
         let shouldNotifyLounge = false;
+        let durationChanged = false;
 
         // Cập nhật thời lượng thực của video
         if (typeof data.duration === 'number' && data.duration > 0) {
@@ -1204,6 +1196,7 @@ wss.on('connection', (ws: WebSocket) => {
           if (Math.abs(roundedDur - currentVideoDuration) >= 1) {
             currentVideoDuration = roundedDur;
             shouldNotifyLounge = true;
+            durationChanged = true;
             console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
           }
           if (pendingDurationResolver) {
@@ -1246,14 +1239,18 @@ wss.on('connection', (ws: WebSocket) => {
           }
         }
 
-        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian chính xác
-        if (shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 800) {
+        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác
+        if (durationChanged || (shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 800)) {
           lastExternalNotifyTime = Date.now();
           const targetStatus = isVideoPlaying
             ? Constants.PLAYER_STATUSES.PLAYING
             : Constants.PLAYER_STATUSES.PAUSED;
           if (ytPlayer.status === Constants.PLAYER_STATUSES.PLAYING || ytPlayer.status === Constants.PLAYER_STATUSES.PAUSED || ytPlayer.status === Constants.PLAYER_STATUSES.LOADING) {
-            ytPlayer.notifyExternalStateChange(targetStatus).catch(() => {});
+            if (durationChanged && ytPlayer.status === Constants.PLAYER_STATUSES.PLAYING && targetStatus === Constants.PLAYER_STATUSES.PLAYING) {
+              // Ép YouTubeApp phát bản tin NowPlaying mới kèm duration và seekableEndTime thực cho thanh tua trên iPhone
+              await ytPlayer.notifyExternalStateChange(Constants.PLAYER_STATUSES.LOADING).catch(() => {});
+            }
+            await ytPlayer.notifyExternalStateChange(targetStatus).catch(() => {});
           }
         }
         return;
