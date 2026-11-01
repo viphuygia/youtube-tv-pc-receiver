@@ -84,7 +84,14 @@ export const translations = {
     saveBtn: "Lưu cài đặt",
     savedSuccess: "Đã lưu cài đặt tự động hóa thành công!",
     testSuccess: "Đã chạy thử thành công!",
-    testError: "Lỗi chạy thử:"
+    testError: "Lỗi chạy thử:",
+    qualityBtn: "Độ phân giải",
+    qualityModalTitle: "Chỉnh Độ Phân Giải Video",
+    qualityModalDesc: "Chọn độ phân giải mong muốn. TV sẽ áp dụng ngay lập tức cho video đang phát và tự động khóa chất lượng này cho các video tiếp theo.",
+    subtitlesBtn: "Phụ đề",
+    subtitlesOff: "Tắt phụ đề",
+    subtitlesVi: "Phụ đề: Tiếng Việt",
+    subtitlesEn: "Phụ đề: Tiếng Anh"
   },
   en: {
     topNoticeStrong: "iPhone Connection Tip:",
@@ -169,6 +176,13 @@ export const translations = {
     saveBtn: "Save Settings",
     savedSuccess: "Automation settings saved successfully!",
     testSuccess: "Test triggered successfully!",
-    testError: "Test error:"
+    testError: "Test error:",
+    qualityBtn: "Quality",
+    qualityModalTitle: "Video Playback Quality",
+    qualityModalDesc: "Select your preferred video resolution. The TV will apply it immediately and remember it for future videos.",
+    subtitlesBtn: "Subtitles",
+    subtitlesOff: "Subtitles: OFF",
+    subtitlesVi: "Subtitles: Vietnamese",
+    subtitlesEn: "Subtitles: English"
   }
 };

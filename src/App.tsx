@@ -60,6 +60,26 @@ export default function App() {
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [showDisplayModal, setShowDisplayModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [showQualityModal, setShowQualityModal] = useState<boolean>(false);
+  const [preferredQuality, setPreferredQuality] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('yt_receiver_quality') || 'hd1080';
+    }
+    return 'hd1080';
+  });
+  const [activeQuality, setActiveQuality] = useState<string>('');
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('yt_receiver_subtitles') === 'true';
+    }
+    return false; // Mặc định tắt phụ đề
+  });
+  const [subtitlesLang, setSubtitlesLang] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('yt_receiver_subtitles_lang') || 'vi';
+    }
+    return 'vi';
+  });
   const [automationSettings, setAutomationSettings] = useState({
     onZeroVolume: '',
     onWake: '',
@@ -91,9 +111,36 @@ export default function App() {
   const isMutedRef = useRef<boolean>(isMuted);
   const playerTimeRef = useRef<number>(0);
   const playerDurationRef = useRef<number>(0);
+  const playerSeekableStartRef = useRef<number>(0);
+  const playerSeekableEndRef = useRef<number>(0);
+  const lastClientSeekRef = useRef<number>(0);
   const playerStateRef = useRef<number>(-1);
   const lastSyncSentRef = useRef<number>(0);
   const hasConnectedWsOnceRef = useRef<boolean>(false);
+  const preferredQualityRef = useRef<string>(preferredQuality);
+  const subtitlesEnabledRef = useRef<boolean>(subtitlesEnabled);
+  const subtitlesLangRef = useRef<string>(subtitlesLang);
+
+  useEffect(() => {
+    preferredQualityRef.current = preferredQuality;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yt_receiver_quality', preferredQuality);
+    }
+  }, [preferredQuality]);
+
+  useEffect(() => {
+    subtitlesEnabledRef.current = subtitlesEnabled;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yt_receiver_subtitles', String(subtitlesEnabled));
+    }
+  }, [subtitlesEnabled]);
+
+  useEffect(() => {
+    subtitlesLangRef.current = subtitlesLang;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yt_receiver_subtitles_lang', subtitlesLang);
+    }
+  }, [subtitlesLang]);
 
   useEffect(() => {
     isStandbyRef.current = isStandby;
@@ -147,7 +194,36 @@ export default function App() {
     }
   }, []);
 
-  // Lắng nghe sự kiện thời gian thực (currentTime, duration, playerState) từ YouTube IFrame trả về
+  // Áp dụng độ phân giải (chất lượng video) lên YouTube IFrame Player
+  const applyQualityToIframe = useCallback((quality: string) => {
+    if (!quality || quality === 'auto' || quality === 'default') {
+      sendIframeCommand('setPlaybackQualityRange', ['default', 'highres']);
+      sendIframeCommand('setPlaybackQuality', ['default']);
+    } else {
+      sendIframeCommand('setPlaybackQualityRange', [quality, quality]);
+      sendIframeCommand('setPlaybackQuality', [quality]);
+    }
+  }, [sendIframeCommand]);
+
+  // Áp dụng bật / tắt phụ đề (Closed Captions) lên YouTube IFrame Player
+  const applySubtitlesToIframe = useCallback((enabled: boolean, subLang: string = 'vi') => {
+    if (!enabled) {
+      // Tắt hoàn toàn phụ đề và gỡ module captions/cc để không tự hiện lại
+      sendIframeCommand('setOption', ['captions', 'track', {}]);
+      sendIframeCommand('setOption', ['cc', 'track', {}]);
+      sendIframeCommand('unloadModule', ['captions']);
+      sendIframeCommand('unloadModule', ['cc']);
+    } else {
+      sendIframeCommand('loadModule', ['captions']);
+      sendIframeCommand('loadModule', ['cc']);
+      setTimeout(() => {
+        sendIframeCommand('setOption', ['captions', 'track', { languageCode: subLang || 'vi' }]);
+        sendIframeCommand('setOption', ['cc', 'track', { languageCode: subLang || 'vi' }]);
+      }, 180);
+    }
+  }, [sendIframeCommand]);
+
+  // Lắng nghe sự kiện thời gian thực (currentTime, duration, progressState, playerState, playbackQuality) từ YouTube IFrame trả về
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (!event.origin.includes('youtube.com')) return;
@@ -156,7 +232,7 @@ export default function App() {
       try {
         const data = JSON.parse(event.data);
 
-        // Khi trình phát YouTube sẵn sàng -> thiết lập ngay âm lượng 30% (hoặc mức đã lưu)
+        // Khi trình phát YouTube sẵn sàng -> thiết lập ngay âm lượng, độ phân giải và trạng thái phụ đề
         if (data.event === 'onReady' || data.event === 'initialDelivery') {
           sendIframeCommand('setVolume', [volumeRef.current]);
           if (isMutedRef.current) {
@@ -164,6 +240,8 @@ export default function App() {
           } else {
             sendIframeCommand('unMute', []);
           }
+          applyQualityToIframe(preferredQualityRef.current);
+          applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
         }
 
         if (data.event === 'infoDelivery' || data.event === 'initialDelivery' || data.event === 'onStateChange') {
@@ -171,24 +249,58 @@ export default function App() {
           let forceImmediateSync = false;
 
           if (info && typeof info === 'object') {
-            if (typeof info.currentTime === 'number' && !isNaN(info.currentTime)) {
-              playerTimeRef.current = info.currentTime;
+            if (typeof info.playbackQuality === 'string' && info.playbackQuality && info.playbackQuality !== 'unknown') {
+              setActiveQuality(info.playbackQuality);
             }
-            if (typeof info.duration === 'number' && info.duration > 0) {
-              if (Math.abs(info.duration - playerDurationRef.current) >= 1) {
+
+            if (info.progressState && typeof info.progressState === 'object') {
+              if (typeof info.progressState.seekableStart === 'number' && !isNaN(info.progressState.seekableStart)) {
+                playerSeekableStartRef.current = info.progressState.seekableStart;
+              }
+              if (typeof info.progressState.seekableEnd === 'number' && info.progressState.seekableEnd > 0) {
+                playerSeekableEndRef.current = Math.max(playerSeekableEndRef.current, info.progressState.seekableEnd);
+              }
+            }
+
+            // Bỏ qua cập nhật currentTime cũ trong 2.2s đầu sau khi người dùng bấm tua (giúp tua ngược video Công chiếu / Trực tiếp mượt mà)
+            if (typeof info.currentTime === 'number' && !isNaN(info.currentTime)) {
+              if (Date.now() - lastClientSeekRef.current > 2200) {
+                playerTimeRef.current = info.currentTime;
+              }
+            }
+
+            const rawDur = Math.max(
+              typeof info.duration === 'number' && !isNaN(info.duration) ? info.duration : 0,
+              playerSeekableEndRef.current,
+              typeof info.progressState?.duration === 'number' ? info.progressState.duration : 0,
+              typeof info.currentTime === 'number' && !isNaN(info.currentTime) ? Math.ceil(info.currentTime) : 0
+            );
+            if (rawDur > 0) {
+              const nextDur = Math.max(playerDurationRef.current, rawDur);
+              if (playerDurationRef.current === 0 || Math.abs(nextDur - playerDurationRef.current) >= 5) {
                 forceImmediateSync = true;
               }
-              playerDurationRef.current = info.duration;
+              playerDurationRef.current = nextDur;
             }
+
             if (typeof info.playerState === 'number') {
               if (info.playerState !== playerStateRef.current) {
                 forceImmediateSync = true;
+                // Khi video vừa chuyển sang trạng thái Đang phát (1), khóa lại độ phân giải và tắt/bật phụ đề theo đúng ý người dùng
+                if (info.playerState === 1) {
+                  applyQualityToIframe(preferredQualityRef.current);
+                  applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
+                }
               }
               playerStateRef.current = info.playerState;
             }
           } else if (data.event === 'onStateChange' && typeof info === 'number') {
             if (info !== playerStateRef.current) {
               forceImmediateSync = true;
+              if (info === 1) {
+                applyQualityToIframe(preferredQualityRef.current);
+                applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
+              }
             }
             playerStateRef.current = info;
           }
@@ -203,6 +315,8 @@ export default function App() {
                   videoId: currentVideoIdRef.current,
                   position: playerTimeRef.current,
                   duration: playerDurationRef.current,
+                  seekableStart: playerSeekableStartRef.current,
+                  seekableEnd: Math.max(playerSeekableEndRef.current, playerDurationRef.current),
                   playerState: playerStateRef.current
                 })
               );
@@ -225,6 +339,8 @@ export default function App() {
     const volInitTimer = setTimeout(() => {
       activateYouTubeBridge();
       sendIframeCommand('setVolume', [volumeRef.current]);
+      applyQualityToIframe(preferredQualityRef.current);
+      applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
     }, 1200);
 
     return () => {
@@ -232,7 +348,7 @@ export default function App() {
       clearInterval(bridgeInterval);
       clearTimeout(volInitTimer);
     };
-  }, [activateYouTubeBridge, sendIframeCommand]);
+  }, [activateYouTubeBridge, sendIframeCommand, applyQualityToIframe, applySubtitlesToIframe]);
 
   const [statusInfo, setStatusInfo] = useState<{ 
     localIp: string; 
@@ -491,6 +607,18 @@ export default function App() {
               if (typeof data.pairingCode === 'string' && data.pairingCode) {
                 setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
               }
+              if (typeof data.preferredQuality === 'string' && data.preferredQuality) {
+                setPreferredQuality(data.preferredQuality);
+                preferredQualityRef.current = data.preferredQuality;
+              }
+              if (typeof data.subtitlesEnabled === 'boolean') {
+                setSubtitlesEnabled(data.subtitlesEnabled);
+                subtitlesEnabledRef.current = data.subtitlesEnabled;
+              }
+              if (typeof data.subtitlesLang === 'string' && data.subtitlesLang) {
+                setSubtitlesLang(data.subtitlesLang);
+                subtitlesLangRef.current = data.subtitlesLang;
+              }
 
               if (incomingStandby) {
                 isStandbyRef.current = true;
@@ -509,8 +637,14 @@ export default function App() {
 
                 playerTimeRef.current = startSec;
                 playerDurationRef.current = 0;
+                playerSeekableStartRef.current = 0;
+                playerSeekableEndRef.current = 0;
                 activateYouTubeBridge();
-                sendIframeCommand('loadVideoById', [incomingVid, startSec]);
+                if (startSec > 0) {
+                  sendIframeCommand('loadVideoById', [incomingVid, startSec]);
+                } else {
+                  sendIframeCommand('loadVideoById', [incomingVid]);
+                }
                 setTimeout(() => {
                   activateYouTubeBridge();
                   sendIframeCommand('playVideo', []);
@@ -520,6 +654,8 @@ export default function App() {
                   } else {
                     sendIframeCommand('unMute', []);
                   }
+                  applyQualityToIframe(preferredQualityRef.current);
+                  applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
                 }, 200);
               } else if (data.video) {
                 setVideo(data.video);
@@ -583,13 +719,27 @@ export default function App() {
                 sendIframeCommand('setVolume', [vol]);
               } else if (data.action === 'seekTo' || data.action === 'seek') {
                 const target = Math.max(0, Number(data.value ?? data.offset) || 0);
+                lastClientSeekRef.current = Date.now();
                 playerTimeRef.current = target;
                 sendIframeCommand('seekTo', [target, true]);
               } else if (data.action === 'seekRelative') {
                 const delta = Number(data.value ?? data.offset) || 0;
                 const target = Math.max(0, playerTimeRef.current + delta);
+                lastClientSeekRef.current = Date.now();
                 playerTimeRef.current = target;
                 sendIframeCommand('seekTo', [target, true]);
+              } else if (data.action === 'setQuality' && typeof data.value === 'string') {
+                setPreferredQuality(data.value);
+                preferredQualityRef.current = data.value;
+                applyQualityToIframe(data.value);
+              } else if (data.action === 'setSubtitles') {
+                const nextEnabled = Boolean(data.enabled);
+                const nextLang = typeof data.lang === 'string' && data.lang ? data.lang : subtitlesLangRef.current;
+                setSubtitlesEnabled(nextEnabled);
+                subtitlesEnabledRef.current = nextEnabled;
+                setSubtitlesLang(nextLang);
+                subtitlesLangRef.current = nextLang;
+                applySubtitlesToIframe(nextEnabled, nextLang);
               } else if (data.action === 'toggleFullscreen') {
                 toggleFullscreen();
               } else if (data.action === 'displayChanged' && data.selectedDisplay) {
@@ -650,7 +800,58 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Keyboard shortcuts (F for fullscreen, M for mute)
+  const handleSelectQuality = (q: string) => {
+    setPreferredQuality(q);
+    preferredQualityRef.current = q;
+    applyQualityToIframe(q);
+    setShowQualityModal(false);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'control', action: 'setQuality', value: q }));
+    }
+  };
+
+  // Chuyển đổi nhanh Phụ đề: TẮT -> Tiếng Việt (VI) -> Tiếng Anh (EN) -> TẮT
+  const handleCycleSubtitles = () => {
+    let nextEnabled = false;
+    let nextLang = subtitlesLangRef.current;
+    if (!subtitlesEnabledRef.current) {
+      nextEnabled = true;
+      nextLang = 'vi';
+    } else if (subtitlesLangRef.current === 'vi') {
+      nextEnabled = true;
+      nextLang = 'en';
+    } else {
+      nextEnabled = false;
+      nextLang = 'vi';
+    }
+    setSubtitlesEnabled(nextEnabled);
+    subtitlesEnabledRef.current = nextEnabled;
+    setSubtitlesLang(nextLang);
+    subtitlesLangRef.current = nextLang;
+    applySubtitlesToIframe(nextEnabled, nextLang);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'control', action: 'setSubtitles', enabled: nextEnabled, lang: nextLang }));
+    }
+  };
+
+  const getQualityBadgeLabel = (q: string) => {
+    const map: Record<string, string> = {
+      highres: '4K+',
+      hd2160: '4K',
+      hd1440: '2K',
+      hd1080: '1080p',
+      hd720: '720p',
+      large: '480p',
+      medium: '360p',
+      small: '240p',
+      tiny: '144p',
+      auto: 'Auto',
+      default: 'Auto'
+    };
+    return map[q] || '1080p';
+  };
+
+  // Keyboard shortcuts (F for fullscreen, M for mute, C for captions/subtitles)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
@@ -665,10 +866,16 @@ export default function App() {
           return next;
         });
       }
+      if (e.key === 'c' || e.key === 'C') {
+        const nextEnabled = !subtitlesEnabledRef.current;
+        setSubtitlesEnabled(nextEnabled);
+        subtitlesEnabledRef.current = nextEnabled;
+        applySubtitlesToIframe(nextEnabled, subtitlesLangRef.current);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sendIframeCommand]);
+  }, [sendIframeCommand, applySubtitlesToIframe]);
 
   // Unified video cast helper: updates local screen AND syncs to server so iPhone Remote updates
   const castVideoOnScreen = (videoId: string, title?: string, source: string = 'Màn hình PC') => {
@@ -676,6 +883,8 @@ export default function App() {
     currentVideoIdRef.current = videoId;
     playerTimeRef.current = 0;
     playerDurationRef.current = 0;
+    playerSeekableStartRef.current = 0;
+    playerSeekableEndRef.current = 0;
 
     setVideo({
       videoId,
@@ -687,10 +896,12 @@ export default function App() {
     });
 
     activateYouTubeBridge();
-    sendIframeCommand('loadVideoById', [videoId, 0]);
+    sendIframeCommand('loadVideoById', [videoId]);
     setTimeout(() => {
       sendIframeCommand('playVideo', []);
       sendIframeCommand('setVolume', [volumeRef.current]);
+      applyQualityToIframe(preferredQualityRef.current);
+      applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
     }, 200);
 
     fetch('/api/cast', {
@@ -943,15 +1154,21 @@ export default function App() {
               setTimeout(() => {
                 activateYouTubeBridge();
                 sendIframeCommand('setVolume', [volumeRef.current]);
+                applyQualityToIframe(preferredQualityRef.current);
+                applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
                 if (!isStandbyRef.current && currentVideoIdRef.current) {
-                  sendIframeCommand('loadVideoById', [currentVideoIdRef.current, playerTimeRef.current || 0]);
+                  if (playerTimeRef.current > 0) {
+                    sendIframeCommand('loadVideoById', [currentVideoIdRef.current, playerTimeRef.current]);
+                  } else {
+                    sendIframeCommand('loadVideoById', [currentVideoIdRef.current]);
+                  }
                   sendIframeCommand('playVideo', []);
                 } else {
                   sendIframeCommand('stopVideo', []);
                 }
               }, 400);
             }}
-            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
+            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=0&controls=1&rel=0&modestbranding=1&playsinline=1&cc_load_policy=0&iv_load_policy=3&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
             title={video.title}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
@@ -1165,6 +1382,34 @@ export default function App() {
                   <Monitor className="w-4 h-4 text-emerald-400" />
                   <span className="font-semibold text-slate-100">
                     {t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}
+                  </span>
+                </button>
+
+                {/* Nút chỉnh Độ phân giải (Chất lượng video) */}
+                <button
+                  onClick={() => setShowQualityModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-cyan-400/60"
+                  title={t.qualityModalTitle}
+                >
+                  <Tv className="w-4 h-4 text-cyan-400" />
+                  <span className="font-mono font-bold text-cyan-300">
+                    {getQualityBadgeLabel(activeQuality || preferredQuality)}
+                  </span>
+                </button>
+
+                {/* Nút bật/tắt Phụ đề (CC) 1 chạm */}
+                <button
+                  onClick={handleCycleSubtitles}
+                  className={`px-3 py-1.5 rounded-xl backdrop-blur-md border transition-all flex items-center gap-1.5 text-xs shadow-lg ${
+                    subtitlesEnabled
+                      ? 'bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-400/50'
+                      : 'bg-black/80 hover:bg-black text-slate-300 border-white/20 hover:border-slate-400/50'
+                  }`}
+                  title={lang === 'vi' ? 'Bấm để chuyển: Tắt phụ đề / Phụ đề Tiếng Việt / Phụ đề Tiếng Anh (Phím tắt: C)' : 'Click to cycle Subtitles: OFF / VI / EN (Shortcut: C)'}
+                >
+                  <span className="font-mono font-black text-[11px] px-1 rounded bg-white/10">CC</span>
+                  <span className="font-semibold hidden sm:inline">
+                    {subtitlesEnabled ? subtitlesLang.toUpperCase() : (lang === 'vi' ? 'Tắt' : 'OFF')}
                   </span>
                 </button>
 
@@ -1619,6 +1864,134 @@ export default function App() {
         </div>
       )}
 
+      {/* Modal Chỉnh Độ Phân Giải & Phụ Đề (Video Quality & Subtitles Modal) */}
+      {showQualityModal && (
+        <div
+          className="fixed inset-0 z-[100001] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setShowQualityModal(false)}
+        >
+          <div
+            className="bg-[#0f1422] border-2 border-cyan-500/50 rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowQualityModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white text-base w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-colors"
+            >
+              ✕
+            </button>
+
+            <div className="flex items-center gap-2.5 text-cyan-400 font-bold text-sm uppercase tracking-wider">
+              <Tv className="w-5 h-5" />
+              <span>{t.qualityModalTitle}</span>
+            </div>
+
+            <p className="text-slate-300 text-xs leading-relaxed">
+              {t.qualityModalDesc}
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {[
+                { id: 'highres', label: '4K / Cao nhất', badge: 'Ultra HD' },
+                { id: 'hd2160', label: '4K (2160p)', badge: '2160p' },
+                { id: 'hd1440', label: '2K (1440p)', badge: '1440p' },
+                { id: 'hd1080', label: 'Full HD (1080p)', badge: '1080p' },
+                { id: 'hd720', label: 'HD (720p)', badge: '720p' },
+                { id: 'large', label: 'Chuẩn (480p)', badge: '480p' },
+                { id: 'medium', label: 'Tiết kiệm (360p)', badge: '360p' },
+                { id: 'auto', label: 'Tự động (Auto)', badge: 'Auto' }
+              ].map(item => {
+                const isSelected = preferredQuality === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleSelectQuality(item.id)}
+                    className={`p-3 rounded-2xl border text-left transition-all flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-cyan-950/70 border-cyan-400 text-white shadow-lg shadow-cyan-500/20'
+                        : 'bg-slate-900/80 hover:bg-slate-800 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-bold">{item.label}</div>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{item.badge}</div>
+                    </div>
+                    {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Phần điều khiển Phụ đề nhanh ngay trong hộp thoại */}
+            <div className="pt-3 border-t border-slate-800 space-y-2.5">
+              <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                <span>{lang === 'vi' ? 'Phụ đề video (Closed Captions):' : 'Subtitles (Closed Captions):'}</span>
+                <span className="text-[11px] font-mono text-emerald-400">
+                  {subtitlesEnabled ? (subtitlesLang === 'vi' ? 'Đang bật (Tiếng Việt)' : 'Đang bật (English)') : 'Đang tắt'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => {
+                    setSubtitlesEnabled(false);
+                    subtitlesEnabledRef.current = false;
+                    applySubtitlesToIframe(false, subtitlesLangRef.current);
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ type: 'control', action: 'setSubtitles', enabled: false, lang: subtitlesLangRef.current }));
+                    }
+                  }}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                    !subtitlesEnabled
+                      ? 'bg-red-600/20 border-red-500 text-red-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  🚫 {lang === 'vi' ? 'Tắt phụ đề' : 'Turn OFF'}
+                </button>
+                <button
+                  onClick={() => {
+                    setSubtitlesEnabled(true);
+                    subtitlesEnabledRef.current = true;
+                    setSubtitlesLang('vi');
+                    subtitlesLangRef.current = 'vi';
+                    applySubtitlesToIframe(true, 'vi');
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ type: 'control', action: 'setSubtitles', enabled: true, lang: 'vi' }));
+                    }
+                  }}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                    subtitlesEnabled && subtitlesLang === 'vi'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  🇻🇳 Tiếng Việt
+                </button>
+                <button
+                  onClick={() => {
+                    setSubtitlesEnabled(true);
+                    subtitlesEnabledRef.current = true;
+                    setSubtitlesLang('en');
+                    subtitlesLangRef.current = 'en';
+                    applySubtitlesToIframe(true, 'en');
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ type: 'control', action: 'setSubtitles', enabled: true, lang: 'en' }));
+                    }
+                  }}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                    subtitlesEnabled && subtitlesLang === 'en'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  🇺🇸 English
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Chon Man Hinh Hien Thi (Tu dong nho cho lan khoi dong sau) */}
       {showDisplayModal && (
         <div
@@ -1687,140 +2060,6 @@ export default function App() {
                   </button>
                 );
               })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Cài Đặt Tự Động Hóa & Custom Actions */}
-      {showSettingsModal && (
-        <div
-          className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
-          onClick={() => setShowSettingsModal(false)}
-        >
-          <div
-            className="bg-[#0f1422] border-2 border-blue-500/50 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl relative"
-            onClick={e => e.stopPropagation()}
-          >
-            <button
-              onClick={() => setShowSettingsModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white text-base w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-colors"
-            >
-              ✕
-            </button>
-
-            <div className="flex items-center gap-2.5 text-blue-400 font-bold text-sm uppercase tracking-wider">
-              <Settings className="w-5 h-5" />
-              <span>{t.automationModalTitle}</span>
-            </div>
-
-            <p className="text-slate-300 text-xs leading-relaxed">
-              {t.automationModalDesc}
-            </p>
-
-            {settingsNotice && (
-              <div className="p-3 rounded-xl bg-blue-950/60 border border-blue-500/50 text-blue-200 text-xs flex items-center gap-2 animate-in fade-in">
-                <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
-                <span className="font-medium">{settingsNotice}</span>
-              </div>
-            )}
-
-            <div className="space-y-4 pt-1 max-h-[60vh] overflow-y-auto pr-1">
-              {/* Cấu hình khi Âm lượng về 0 */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                    <VolumeX className="w-4 h-4 text-amber-400" />
-                    <span>{t.onZeroVolumeLabel}</span>
-                  </label>
-                  <p className="text-[11px] text-slate-400">{t.onZeroVolumeHelp}</p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={automationSettings.onZeroVolume}
-                    onChange={e => setAutomationSettings(s => ({ ...s, onZeroVolume: e.target.value }))}
-                    placeholder={t.onZeroVolumePlaceholder}
-                    className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleTestCommand(automationSettings.onZeroVolume, 'zero_volume')}
-                    disabled={!automationSettings.onZeroVolume.trim()}
-                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors shrink-0"
-                  >
-                    {t.testBtn}
-                  </button>
-                </div>
-
-                <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={automationSettings.collapseOnZeroVolume}
-                    onChange={e => setAutomationSettings(s => ({ ...s, collapseOnZeroVolume: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-blue-500"
-                  />
-                  <span className="text-xs text-slate-300">{t.collapseOnZeroVolumeLabel}</span>
-                </label>
-              </div>
-
-              {/* Cấu hình khi Đánh thức / Tăng âm lượng */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
-                    <Volume2 className="w-4 h-4 text-emerald-400" />
-                    <span>{t.onWakeLabel}</span>
-                  </label>
-                  <p className="text-[11px] text-slate-400">{t.onWakeHelp}</p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={automationSettings.onWake}
-                    onChange={e => setAutomationSettings(s => ({ ...s, onWake: e.target.value }))}
-                    placeholder={t.onWakePlaceholder}
-                    className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleTestCommand(automationSettings.onWake, 'wake')}
-                    disabled={!automationSettings.onWake.trim()}
-                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors shrink-0"
-                  >
-                    {t.testBtn}
-                  </button>
-                </div>
-
-                <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={automationSettings.restoreOnWake}
-                    onChange={e => setAutomationSettings(s => ({ ...s, restoreOnWake: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-blue-500"
-                  />
-                  <span className="text-xs text-slate-300">{t.restoreOnWakeLabel}</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setShowSettingsModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
-              >
-                {lang === 'vi' ? 'Đóng' : 'Close'}
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveAutomation}
-                disabled={isSavingSettings}
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50"
-              >
-                {isSavingSettings ? (lang === 'vi' ? 'Đang lưu...' : 'Saving...') : t.saveBtn}
-              </button>
             </div>
           </div>
         </div>

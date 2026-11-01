@@ -91,15 +91,21 @@ let currentVideo = {
 let realPairingCode = '';
 const connectedClients = new Set<WebSocket>();
 
-// Biến theo dõi âm lượng, vị trí và thời lượng thực tế của video đang phát
+// Biến theo dõi âm lượng, vị trí, thời lượng thực tế, độ phân giải & phụ đề của video đang phát
 let currentVolumeLevel = 30; // Mặc định 30% khi khởi động
 let isVolumeMuted = false;
 let currentPositionSeconds = 0;
 let currentVideoDuration = 0; // Thời lượng thực của video (giây) đồng bộ từ YouTube IFrame Player
+let currentSeekableStartTime = 0;
+let currentSeekableEndTime = 0;
 let positionLastUpdated = Date.now();
 let isVideoPlaying = false;
-let lastSeekTimestamp = 0; // Chống nhảy ngược về 0s khi đang tua
+let lastSeekTimestamp = 0; // Chống nhảy ngược về live-head / 0s khi đang tua
 let lastExternalNotifyTime = 0;
+let lastDurationNotifyTime = 0;
+let preferredQuality = 'hd1080'; // Độ phân giải ưu tiên mặc định (hd2160, hd1440, hd1080, hd720, large, medium, auto)
+let subtitlesEnabled = false; // Mặc định tắt phụ đề
+let subtitlesLang = 'vi';
 
 // Resolver chờ thời lượng thực từ trình phát khi bắt đầu video mới
 let pendingDurationResolver: ((dur: number) => void) | null = null;
@@ -399,7 +405,10 @@ function broadcastVideo(videoData: typeof currentVideo) {
     video: currentVideo,
     isStandby: false,
     volume: currentVolumeLevel,
-    isMuted: isVolumeMuted
+    isMuted: isVolumeMuted,
+    preferredQuality,
+    subtitlesEnabled,
+    subtitlesLang
   });
   connectedClients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -535,6 +544,9 @@ class WebCastPlayer extends Player {
     // Đặt lại thời lượng khi đổi sang video khác
     if (currentVideo.videoId !== video.id) {
       currentVideoDuration = 0;
+      currentSeekableStartTime = 0;
+      currentSeekableEndTime = 0;
+      lastDurationNotifyTime = 0;
     }
 
     const initialTitle = video.title || `YouTube Video (${video.id})`;
@@ -600,10 +612,11 @@ class WebCastPlayer extends Player {
   protected async doSeek(position: number): Promise<boolean> {
     let target = Math.max(0, Math.floor(Number(position) || 0));
     cancelAutoStandby();
-    if (currentVideoDuration > 0 && target > currentVideoDuration) {
-      target = currentVideoDuration;
+    const maxSeek = Math.max(currentVideoDuration, currentSeekableEndTime);
+    if (maxSeek > 0 && target > maxSeek) {
+      target = maxSeek;
     }
-    console.log(`[YouTube Cast Tua] iPhone yêu cầu tua tới: ${target}s (Duration: ${currentVideoDuration}s)`);
+    console.log(`[YouTube Cast Tua] iPhone yêu cầu tua tới: ${target}s (Duration: ${currentVideoDuration}s, SeekableEnd: ${currentSeekableEndTime}s)`);
     currentPositionSeconds = target;
     positionLastUpdated = Date.now();
     lastSeekTimestamp = Date.now();
@@ -632,23 +645,68 @@ class WebCastPlayer extends Player {
 
   protected async doGetPosition(): Promise<number> {
     let current = currentPositionSeconds;
-    if (isVideoPlaying && Date.now() - lastSeekTimestamp > 1200) {
+    if (isVideoPlaying && Date.now() - lastSeekTimestamp > 2200) {
       current += (Date.now() - positionLastUpdated) / 1000;
     }
-    if (currentVideoDuration > 0 && current > currentVideoDuration) {
-      current = currentVideoDuration;
+    const maxDur = Math.max(currentVideoDuration, currentSeekableEndTime);
+    if (maxDur > 0 && current > maxDur) {
+      current = maxDur;
     }
     return Math.max(0, Math.floor(current));
   }
 
   protected async doGetDuration(): Promise<number> {
-    // Trả về chính xác thời lượng thực của video từ YouTube Player trên PC
-    return currentVideoDuration > 0 ? Math.round(currentVideoDuration) : 0;
+    // Trả về chính xác thời lượng thực (hoặc live edge đối với video trực tiếp/công chiếu) để thanh tua trên iPhone kéo ngược về được
+    const effDur = Math.max(currentVideoDuration, currentSeekableEndTime, Math.ceil(currentPositionSeconds));
+    return effDur > 0 ? Math.round(effDur) : 0;
+  }
+
+  async getSeekableRange(): Promise<{ start: number; end: number }> {
+    const effEnd = Math.max(currentSeekableEndTime, currentVideoDuration, Math.ceil(currentPositionSeconds));
+    return {
+      start: Math.max(0, Math.floor(currentSeekableStartTime)),
+      end: Math.max(0, Math.round(effEnd))
+    };
   }
 }
 
 const ytPlayer = new WebCastPlayer();
 const persistentStore = new PersistentDataStore();
+
+// Khôi phục cài đặt độ phân giải và phụ đề đã lưu
+(async () => {
+  const savedQuality = await persistentStore.get('tv.preferredQuality');
+  if (typeof savedQuality === 'string' && savedQuality) {
+    preferredQuality = savedQuality;
+  }
+  const savedSubs = await persistentStore.get('tv.subtitlesEnabled');
+  if (typeof savedSubs === 'boolean') {
+    subtitlesEnabled = savedSubs;
+  }
+  const savedSubsLang = await persistentStore.get('tv.subtitlesLang');
+  if (typeof savedSubsLang === 'string' && savedSubsLang) {
+    subtitlesLang = savedSubsLang;
+  }
+})();
+
+// Lắng nghe sự kiện bật/tắt phụ đề trực tiếp từ nút CC trên ứng dụng YouTube của iPhone
+ytPlayer.on('subtitlesTrack', async (evt: any) => {
+  const payload = evt?.payload || {};
+  const langCode = typeof payload.languageCode === 'string' ? payload.languageCode.trim() : '';
+  const enabled = Boolean(langCode && langCode.toLowerCase() !== 'off' && langCode.toLowerCase() !== 'none');
+  subtitlesEnabled = enabled;
+  if (enabled && langCode) {
+    subtitlesLang = langCode;
+    await persistentStore.set('tv.subtitlesLang', subtitlesLang);
+  }
+  await persistentStore.set('tv.subtitlesEnabled', subtitlesEnabled);
+  console.log(`[YouTube Cast Subtitles] Nhận lệnh Phụ đề từ iPhone: ${enabled ? `BẬT (${subtitlesLang})` : 'TẮT'}`);
+  broadcastControl({
+    action: 'setSubtitles',
+    enabled: subtitlesEnabled,
+    lang: subtitlesLang
+  });
+});
 
 // ==========================================
 // MULTI-MONITOR / DISPLAY SELECTION SYSTEM
@@ -1167,7 +1225,10 @@ wss.on('connection', (ws: WebSocket) => {
     isStandby,
     pairingCode: formatPairingCode(realPairingCode),
     volume: currentVolumeLevel,
-    isMuted: isVolumeMuted
+    isMuted: isVolumeMuted,
+    preferredQuality,
+    subtitlesEnabled,
+    subtitlesLang
   }));
 
   // Đảm bảo cửa sổ Kiosk tự động di chuyển đúng sang màn hình đã lưu khi vừa mở (nếu đang không ở chế độ ẩn)
@@ -1181,7 +1242,7 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       const data = JSON.parse(raw.toString());
 
-      // Đồng bộ thời gian thực (position, duration, playerState) từ YouTube IFrame Player trên PC gửi về
+      // Đồng bộ thời gian thực (position, duration, seekableStart, seekableEnd, playerState) từ YouTube IFrame Player trên PC gửi về
       if (data.type === 'player_sync') {
         if (data.videoId && data.videoId !== currentVideo.videoId) {
           return;
@@ -1190,31 +1251,49 @@ wss.on('connection', (ws: WebSocket) => {
         let shouldNotifyLounge = false;
         let durationChanged = false;
 
-        // Cập nhật thời lượng thực của video
-        if (typeof data.duration === 'number' && data.duration > 0) {
-          const roundedDur = Math.round(data.duration);
-          if (Math.abs(roundedDur - currentVideoDuration) >= 1) {
-            currentVideoDuration = roundedDur;
-            shouldNotifyLounge = true;
-            durationChanged = true;
-            console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
-          }
-          if (pendingDurationResolver) {
-            const r = pendingDurationResolver;
-            pendingDurationResolver = null;
-            r(currentVideoDuration);
-          }
+        if (typeof data.seekableStart === 'number' && data.seekableStart >= 0) {
+          currentSeekableStartTime = data.seekableStart;
+        }
+        if (typeof data.seekableEnd === 'number' && data.seekableEnd > 0) {
+          currentSeekableEndTime = Math.max(currentSeekableEndTime, data.seekableEnd);
         }
 
-        // Cập nhật vị trí giây thực tế (bỏ qua trong 1.5s đầu sau khi người dùng vừa bấm tua để tránh giật ngược)
+        // Cập nhật vị trí giây thực tế (bỏ qua trong 2.5s đầu sau khi người dùng vừa bấm tua để hỗ trợ DVR Live/Công chiếu không bị giật ngược)
         if (typeof data.position === 'number' && data.position >= 0) {
-          if (Date.now() - lastSeekTimestamp > 1500) {
+          if (Date.now() - lastSeekTimestamp > 2500) {
             const prevPos = Math.floor(currentPositionSeconds);
             currentPositionSeconds = data.position;
             positionLastUpdated = Date.now();
             if (Math.abs(Math.floor(data.position) - prevPos) >= 2) {
               shouldNotifyLounge = true;
             }
+          }
+        }
+
+        // Cập nhật thời lượng thực (hoặc đỉnh live-edge đối với video Trực tiếp / Công chiếu)
+        const candidateDur = Math.max(
+          typeof data.duration === 'number' && data.duration > 0 ? data.duration : 0,
+          currentSeekableEndTime,
+          Math.ceil(currentPositionSeconds)
+        );
+        if (candidateDur > 0) {
+          const roundedDur = Math.max(currentVideoDuration, Math.round(candidateDur));
+          const prevDur = currentVideoDuration;
+          if (roundedDur !== currentVideoDuration) {
+            currentVideoDuration = roundedDur;
+            currentSeekableEndTime = Math.max(currentSeekableEndTime, roundedDur);
+            // Chỉ ép phát lại NowPlaying (LOADING -> PLAYING) ở lần đầu nhận được duration hoặc khi duration nhảy > 15s (tránh spam mỗi 1s trên livestream làm khóa thanh tua)
+            if (prevDur === 0 || (Math.abs(roundedDur - prevDur) > 15 && Date.now() - lastDurationNotifyTime > 10000)) {
+              durationChanged = true;
+              shouldNotifyLounge = true;
+              lastDurationNotifyTime = Date.now();
+              console.log(`[Player Sync] Đã đồng bộ thời lượng / phạm vi tua của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
+            }
+          }
+          if (pendingDurationResolver) {
+            const r = pendingDurationResolver;
+            pendingDurationResolver = null;
+            r(currentVideoDuration);
           }
         }
 
@@ -1225,7 +1304,7 @@ wss.on('connection', (ws: WebSocket) => {
             isVideoPlaying = true;
             positionLastUpdated = Date.now();
             shouldNotifyLounge = true;
-          } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 1500) {
+          } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 2500) {
             isVideoPlaying = false;
             shouldNotifyLounge = true;
           } else if (data.playerState === 0) {
@@ -1239,8 +1318,8 @@ wss.on('connection', (ws: WebSocket) => {
           }
         }
 
-        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác
-        if (durationChanged || (shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 800)) {
+        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác (không ghi đè khi người dùng đang kéo tua)
+        if (Date.now() - lastSeekTimestamp > 2500 && (durationChanged || (shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 1000))) {
           lastExternalNotifyTime = Date.now();
           const targetStatus = isVideoPlaying
             ? Constants.PLAYER_STATUSES.PLAYING
@@ -1279,14 +1358,43 @@ wss.on('connection', (ws: WebSocket) => {
           handleVolumeAutomation(currentVolumeLevel, false, 'Remote WebSocket');
         } else if (data.action === 'seekRelative' && typeof data.value === 'number') {
           let target = Math.max(0, Math.floor(currentPositionSeconds + data.value));
-          if (currentVideoDuration > 0 && target > currentVideoDuration) {
-            target = Math.max(0, currentVideoDuration - 1);
+          const maxDur = Math.max(currentVideoDuration, currentSeekableEndTime);
+          if (maxDur > 0 && target > maxDur) {
+            target = Math.max(0, maxDur - 1);
           }
           currentPositionSeconds = target;
           positionLastUpdated = Date.now();
           lastSeekTimestamp = Date.now();
           data.action = 'seekTo';
           data.value = target;
+        } else if (data.action === 'seekTo' && typeof data.value === 'number') {
+          const target = Math.max(0, Math.floor(data.value));
+          currentPositionSeconds = target;
+          positionLastUpdated = Date.now();
+          lastSeekTimestamp = Date.now();
+        } else if (data.action === 'setQuality' && typeof data.value === 'string') {
+          preferredQuality = data.value;
+          persistentStore.set('tv.preferredQuality', preferredQuality).catch(() => {});
+          console.log(`[Player Settings] Đã chỉnh độ phân giải ưu tiên: ${preferredQuality}`);
+        } else if (data.action === 'setSubtitles') {
+          subtitlesEnabled = Boolean(data.enabled);
+          if (typeof data.lang === 'string' && data.lang) {
+            subtitlesLang = data.lang;
+            persistentStore.set('tv.subtitlesLang', subtitlesLang).catch(() => {});
+          }
+          persistentStore.set('tv.subtitlesEnabled', subtitlesEnabled).catch(() => {});
+          console.log(`[Player Settings] Đã chỉnh phụ đề: ${subtitlesEnabled ? `BẬT (${subtitlesLang})` : 'TẮT'}`);
+        } else if (data.action === 'toggleSubtitles') {
+          subtitlesEnabled = !subtitlesEnabled;
+          if (typeof data.lang === 'string' && data.lang) {
+            subtitlesLang = data.lang;
+            persistentStore.set('tv.subtitlesLang', subtitlesLang).catch(() => {});
+          }
+          persistentStore.set('tv.subtitlesEnabled', subtitlesEnabled).catch(() => {});
+          data.action = 'setSubtitles';
+          data.enabled = subtitlesEnabled;
+          data.lang = subtitlesLang;
+          console.log(`[Player Settings] Chuyển đổi phụ đề: ${subtitlesEnabled ? `BẬT (${subtitlesLang})` : 'TẮT'}`);
         }
 
         // Forward control commands to TV screen & remotes
@@ -1299,6 +1407,9 @@ wss.on('connection', (ws: WebSocket) => {
         const vid = data.videoId;
         if (vid) {
           currentVideoDuration = 0;
+          currentSeekableStartTime = 0;
+          currentSeekableEndTime = 0;
+          lastDurationNotifyTime = 0;
           currentPositionSeconds = 0;
           positionLastUpdated = Date.now();
           broadcastVideo({
@@ -1391,6 +1502,9 @@ app.post('/api/cast', async (req, res) => {
     }
 
     currentVideoDuration = 0;
+    currentSeekableStartTime = 0;
+    currentSeekableEndTime = 0;
+    lastDurationNotifyTime = 0;
     currentPositionSeconds = 0;
     positionLastUpdated = Date.now();
 
@@ -1419,9 +1533,14 @@ app.get('/api/status', (req, res) => {
     isStandby,
     currentVideo,
     position: Math.floor(currentPositionSeconds),
-    duration: currentVideoDuration,
+    duration: Math.max(currentVideoDuration, currentSeekableEndTime),
+    seekableStartTime: currentSeekableStartTime,
+    seekableEndTime: Math.max(currentSeekableEndTime, currentVideoDuration),
     volume: currentVolumeLevel,
     isMuted: isVolumeMuted,
+    preferredQuality,
+    subtitlesEnabled,
+    subtitlesLang,
     connectedScreenClients: connectedClients.size
   });
 });

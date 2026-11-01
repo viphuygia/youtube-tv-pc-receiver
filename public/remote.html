@@ -119,7 +119,12 @@
       </div>
 
       <!-- Main playback buttons -->
-      <div class="flex items-center justify-center gap-5">
+      <div class="flex items-center justify-center gap-3">
+        <!-- Rewind 30s (DVR / Live / Premiere) -->
+        <button onclick="sendControl('seekRelative', -30)" class="w-11 h-11 rounded-2xl bg-slate-900 hover:bg-slate-800 active:scale-90 border border-slate-700/80 text-slate-300 flex flex-col items-center justify-center transition-all shadow-sm">
+          <span class="text-[10px] font-bold font-mono">-30s</span>
+        </button>
+
         <!-- Rewind 10s -->
         <button onclick="sendControl('seekRelative', -10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
@@ -136,6 +141,11 @@
         <button onclick="sendControl('seekRelative', 10)" class="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-90 border border-slate-700 text-slate-200 flex flex-col items-center justify-center transition-all shadow-md">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
           <span class="text-[9px] font-bold -mt-0.5">+10s</span>
+        </button>
+
+        <!-- Forward 30s -->
+        <button onclick="sendControl('seekRelative', 30)" class="w-11 h-11 rounded-2xl bg-slate-900 hover:bg-slate-800 active:scale-90 border border-slate-700/80 text-slate-300 flex flex-col items-center justify-center transition-all shadow-sm">
+          <span class="text-[10px] font-bold font-mono">+30s</span>
         </button>
       </div>
 
@@ -186,6 +196,41 @@
             <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
             <span id="standby-text">Chế độ chờ (Standby)</span>
           </button>
+        </div>
+      </div>
+
+      <!-- Chỉnh Độ Phân Giải (Video Quality) & Phụ Đề (Subtitles CC) -->
+      <div class="bg-black/50 border border-slate-800/80 rounded-2xl p-3 space-y-3">
+        <!-- Độ phân giải -->
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-300 font-semibold flex items-center gap-1.5">
+              <span>📺 Độ phân giải video</span>
+            </span>
+            <span id="quality-display" class="font-mono text-cyan-400 font-bold text-[11px]">1080p</span>
+          </div>
+          <div class="grid grid-cols-5 gap-1.5 text-[11px] font-bold">
+            <button onclick="setQuality('highres', '4K')" class="py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-cyan-300">4K</button>
+            <button onclick="setQuality('hd1080', '1080p')" class="py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-white">1080p</button>
+            <button onclick="setQuality('hd720', '720p')" class="py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-slate-300">720p</button>
+            <button onclick="setQuality('large', '480p')" class="py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-slate-300">480p</button>
+            <button onclick="setQuality('auto', 'Auto')" class="py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-slate-400">Auto</button>
+          </div>
+        </div>
+
+        <!-- Phụ đề (CC) -->
+        <div class="space-y-1.5 pt-2 border-t border-slate-800/80">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-300 font-semibold flex items-center gap-1.5">
+              <span>💬 Phụ đề (CC)</span>
+            </span>
+            <span id="subtitles-display" class="font-mono text-red-400 font-bold text-[11px]">Đã tắt</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1.5 text-[11px] font-bold">
+            <button onclick="setSubtitles(false, 'vi')" class="py-2 rounded-lg bg-red-950/60 hover:bg-red-900/60 active:scale-95 border border-red-700/50 text-red-300">🚫 Tắt phụ đề</button>
+            <button onclick="setSubtitles(true, 'vi')" class="py-2 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-emerald-300">🇻🇳 Tiếng Việt</button>
+            <button onclick="setSubtitles(true, 'en')" class="py-2 rounded-lg bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-blue-300">🇺🇸 English</button>
+          </div>
         </div>
       </div>
     </div>
@@ -469,6 +514,24 @@
     function sendControl(action, value) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'control', action, value, offset: value }));
+      }
+      if (navigator.vibrate) navigator.vibrate(25);
+    }
+
+    function setQuality(q, label) {
+      const el = document.getElementById('quality-display');
+      if (el) el.textContent = label;
+      sendControl('setQuality', q);
+    }
+
+    function setSubtitles(enabled, lang) {
+      const el = document.getElementById('subtitles-display');
+      if (el) {
+        el.textContent = enabled ? ('Bật (' + lang.toUpperCase() + ')') : 'Đã tắt';
+        el.className = enabled ? 'font-mono text-emerald-400 font-bold text-[11px]' : 'font-mono text-red-400 font-bold text-[11px]';
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'control', action: 'setSubtitles', enabled, lang }));
       }
       if (navigator.vibrate) navigator.vibrate(25);
     }
