@@ -403,6 +403,7 @@ export default function App() {
             }
 
             if (data.type === 'cast_video') {
+              try { window.focus(); } catch {}
               if (data.isStandby !== undefined) {
                 setIsStandby(Boolean(data.isStandby));
               } else if (data.video?.videoId) {
@@ -444,6 +445,7 @@ export default function App() {
                 sendIframeCommand('stopVideo', []);
                 setVideo(prev => ({ ...prev, isPlaying: false }));
               } else if (data.action === 'wake') {
+                try { window.focus(); } catch {}
                 setIsStandby(false);
               } else if (data.action === 'updateTitle' && data.title) {
                 setVideo(prev => (prev.videoId === data.videoId ? { ...prev, title: data.title } : prev));

@@ -128,29 +128,63 @@ async function minimizeKioskWindow() {
   const ps = `
 Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
+
 public class Win32TvMinimizer {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll", CharSet = CharSet.Auto)]
+  public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+  public static List<IntPtr> FindWindows(int[] pids) {
+    List<IntPtr> list = new List<IntPtr>();
+    HashSet<int> set = new HashSet<int>(pids);
+    EnumWindows((hWnd, lParam) => {
+      uint pid;
+      GetWindowThreadProcessId(hWnd, out pid);
+      if (set.Contains((int)pid)) {
+        StringBuilder sb = new StringBuilder(256);
+        GetClassName(hWnd, sb, 256);
+        string cls = sb.ToString();
+        if (cls.StartsWith("Chrome_WidgetWin")) {
+          list.Add(hWnd);
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
 }
 "@
 
 $kioskProcs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' -and $_.CommandLine -like '*--kiosk*' })
-# Đóng tất cả các cửa sổ Kiosk bị mở thừa/trùng, chỉ giữ lại duy nhất 1 cửa sổ chính
 if ($kioskProcs.Count -gt 1) {
   for ($i = 1; $i -lt $kioskProcs.Count; $i++) {
     Stop-Process -Id $kioskProcs[$i].ProcessId -Force -ErrorAction SilentlyContinue
   }
 }
 
-$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' }
-foreach ($p in $procs) {
-  try {
-    $procObj = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
-    if ($procObj -and $procObj.MainWindowHandle -ne 0) {
-      [Win32TvMinimizer]::ShowWindow($procObj.MainWindowHandle, 6) | Out-Null # 6 = SW_MINIMIZE
+$allPids = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | Select-Object -ExpandProperty ProcessId)
+if ($allPids.Count -gt 0) {
+  $targetHwnds = [Win32TvMinimizer]::FindWindows([int[]]$allPids)
+  foreach ($h in $targetHwnds) {
+    [Win32TvMinimizer]::ShowWindow($h, 6) | Out-Null # 6 = SW_MINIMIZE
+  }
+  if ($targetHwnds.Count -eq 0) {
+    foreach ($pidVal in $allPids) {
+      $pr = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
+      if ($pr -and $pr.MainWindowHandle -ne 0) {
+        [Win32TvMinimizer]::ShowWindow($pr.MainWindowHandle, 6) | Out-Null
+      }
     }
-  } catch {}
+  }
 }
 `;
   await runPowerShellEncoded(ps);
@@ -397,6 +431,8 @@ class WebCastPlayer extends Player {
     cancelAutoStandby();
     if (isStandby) {
       exitStandbyMode('iPhone Resume').catch(() => {});
+    } else {
+      restoreKioskWindow().catch(() => {});
     }
     positionLastUpdated = Date.now();
     isVideoPlaying = true;
@@ -581,7 +617,7 @@ function updateChromeProfilePlacement(display: DisplayInfo) {
   } catch {}
 }
 
-// Di chuyển ngay lập tức cửa sổ TV Kiosk đang mở sang màn hình được chọn bằng Win32 API
+// Di chuyển và đưa ngay lập tức cửa sổ TV Kiosk lên trên cùng màn hình (Foreground / Topmost) bằng Win32 API
 async function moveKioskWindowToDisplay(display: DisplayInfo) {
   updateChromeProfilePlacement(display);
   if (process.platform !== 'win32') return;
@@ -589,38 +625,129 @@ async function moveKioskWindowToDisplay(display: DisplayInfo) {
   const ps = `
 Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
-public class Win32TvMover {
+using System.Text;
+
+public class Win32TvForegrounder {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
   [DllImport("user32.dll")]
-  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+  [DllImport("user32.dll", CharSet = CharSet.Auto)]
+  public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+  [DllImport("user32.dll")]
+  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+  [DllImport("user32.dll")]
+  public static extern bool BringWindowToTop(IntPtr hWnd);
+
   [DllImport("user32.dll")]
   public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll")]
+  public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+  [DllImport("kernel32.dll")]
+  public static extern uint GetCurrentThreadId();
+
+  public static List<IntPtr> FindWindows(int[] pids) {
+    List<IntPtr> list = new List<IntPtr>();
+    HashSet<int> set = new HashSet<int>(pids);
+    EnumWindows((hWnd, lParam) => {
+      uint pid;
+      GetWindowThreadProcessId(hWnd, out pid);
+      if (set.Contains((int)pid)) {
+        StringBuilder sb = new StringBuilder(256);
+        GetClassName(hWnd, sb, 256);
+        string cls = sb.ToString();
+        if (cls.StartsWith("Chrome_WidgetWin")) {
+          list.Add(hWnd);
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+
+  public static void BringToFront(IntPtr hWnd, int x, int y, int w, int h) {
+    if (hWnd == IntPtr.Zero) return;
+
+    // 1. Khôi phục trạng thái cửa sổ và phóng to
+    ShowWindow(hWnd, 9); // SW_RESTORE
+    ShowWindow(hWnd, 3); // SW_MAXIMIZE
+
+    // 2. Định vị tọa độ và kích thước trên màn hình đã chọn
+    // HWND_TOPMOST (-1), SWP_SHOWWINDOW (0x0040) -> kéo lên trên cùng danh sách Z-order
+    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
+    // HWND_NOTOPMOST (-2) -> duy trì vị trí trên cùng nhưng không khóa cứng vĩnh viễn
+    SetWindowPos(hWnd, new IntPtr(-2), x, y, w, h, 0x0040);
+
+    // 3. Vượt qua cơ chế chặn chiếm tiêu điểm (Focus Stealing Prevention) của Windows bằng AttachThreadInput
+    try {
+      IntPtr fg = GetForegroundWindow();
+      if (fg != IntPtr.Zero && fg != hWnd) {
+        uint fgThread = GetWindowThreadProcessId(fg, out _);
+        uint curThread = GetCurrentThreadId();
+        if (fgThread != 0 && fgThread != curThread) {
+          AttachThreadInput(curThread, fgThread, true);
+          SetForegroundWindow(hWnd);
+          BringWindowToTop(hWnd);
+          AttachThreadInput(curThread, fgThread, false);
+        }
+      }
+      SetForegroundWindow(hWnd);
+      BringWindowToTop(hWnd);
+    } catch {}
+
+    // 4. SwitchToThisWindow: Lệnh chuyển tác vụ cấp hệ thống để đưa ngay cửa sổ lên đầu màn hình
+    try {
+      SwitchToThisWindow(hWnd, true);
+    } catch {}
+  }
 }
 "@
 
 $kioskProcs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' -and $_.CommandLine -like '*--kiosk*' })
-# Đóng tất cả các cửa sổ Kiosk bị mở thừa/trùng, chỉ giữ lại duy nhất 1 cửa sổ chính
 if ($kioskProcs.Count -gt 1) {
   for ($i = 1; $i -lt $kioskProcs.Count; $i++) {
     Stop-Process -Id $kioskProcs[$i].ProcessId -Force -ErrorAction SilentlyContinue
   }
 }
 
-$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' }
-foreach ($p in $procs) {
-  try {
-    $procObj = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
-    if ($procObj -and $procObj.MainWindowHandle -ne 0) {
-      $h = $procObj.MainWindowHandle
-      [Win32TvMover]::ShowWindow($h, 9) | Out-Null # 9 = SW_RESTORE
-      [Win32TvMover]::SetWindowPos($h, [IntPtr]::Zero, ${display.x}, ${display.y}, ${display.width}, ${display.height}, 0x0040) | Out-Null
-      [Win32TvMover]::ShowWindow($h, 3) | Out-Null # 3 = SW_MAXIMIZE
-      [Win32TvMover]::SetWindowPos($h, [IntPtr]::Zero, ${display.x}, ${display.y}, ${display.width}, ${display.height}, 0x0040) | Out-Null
-      [Win32TvMover]::SetForegroundWindow($h) | Out-Null
+$allPids = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | Select-Object -ExpandProperty ProcessId)
+if ($allPids.Count -gt 0) {
+  $targetHwnds = [Win32TvForegrounder]::FindWindows([int[]]$allPids)
+  foreach ($h in $targetHwnds) {
+    [Win32TvForegrounder]::BringToFront($h, ${display.x}, ${display.y}, ${display.width}, ${display.height})
+  }
+
+  # Fallback nếu FindWindows không khớp class
+  if ($targetHwnds.Count -eq 0) {
+    foreach ($pidVal in $allPids) {
+      $pr = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
+      if ($pr -and $pr.MainWindowHandle -ne 0) {
+        [Win32TvForegrounder]::BringToFront($pr.MainWindowHandle, ${display.x}, ${display.y}, ${display.width}, ${display.height})
+      }
     }
-  } catch {}
+  }
 }
 `;
   await runPowerShellEncoded(ps);
@@ -749,9 +876,12 @@ detectDisplays().then(() => getTargetDisplay()).then((target) => {
   console.log(`[Display Manager] Màn hình khởi động đã chọn: Màn hình ${target.id} (${target.deviceName}) [${target.x},${target.y} ${target.width}x${target.height}]`);
 }).catch(() => {});
 
-ytReceiver.on('senderConnect', (sender: any) => {
-  console.log(`[YouTube Cast] Connected to sender: ${sender?.name || 'iPhone'}`);
-  broadcastControl({ action: 'senderConnected', senderName: sender?.name });
+ytReceiver.on('senderConnect', async (sender: any) => {
+  const senderName = sender?.name || 'iPhone';
+  console.log(`[YouTube Cast] Connected to sender: ${senderName}. Kích hoạt đưa cửa sổ TV lên trên cùng màn hình!`);
+  broadcastControl({ action: 'senderConnected', senderName });
+  // Đưa ngay cửa sổ TV lên trên cùng màn hình và thoát chế độ ẩn khi điện thoại kết nối lại
+  await exitStandbyMode(`Điện thoại kết nối lại (${senderName})`);
 });
 
 ytReceiver.on('senderDisconnect', (sender: any, implicit?: boolean) => {
