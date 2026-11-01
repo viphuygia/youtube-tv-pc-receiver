@@ -140,7 +140,7 @@ async function runTvWindowManager(action: 'minimize' | 'restore', display?: Disp
     if (action === 'restore' && display) {
       args.push(String(display.x), String(display.y), String(display.width), String(display.height));
     }
-    const proc = spawn(tvWindowManagerPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(tvWindowManagerPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let out = '';
     proc.stdout?.on('data', d => { out += d.toString(); });
     proc.on('close', (code) => {
@@ -331,9 +331,9 @@ async function runCustomAutomation(trigger: 'zero_volume' | 'wake', customCmd?: 
       console.log(`[Automation Trigger] Kích hoạt tác vụ tự động hóa [${trigger}]: "${trimmed}"`);
       if (process.platform === 'win32') {
         // Khởi chạy độc lập bằng start "" để không làm treo tiến trình server Node.js
-        exec(`start "" ${trimmed}`, (error) => {
+        exec(`start "" ${trimmed}`, { windowsHide: true }, (error) => {
           if (error) {
-            exec(trimmed, (err2) => {
+            exec(trimmed, { windowsHide: true }, (err2) => {
               if (err2) {
                 console.error(`[Automation Trigger Error] Lỗi khi chạy lệnh [${trigger}]:`, err2.message);
               }
@@ -732,8 +732,9 @@ let preferredDisplayDeviceName: string = '';
 function runPowerShellEncoded(psScript: string): Promise<string> {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve('');
-    const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-'], {
-      stdio: ['pipe', 'pipe', 'pipe']
+    const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', '-'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let stdout = '';
@@ -840,7 +841,7 @@ async function isKioskRunning(): Promise<boolean> {
   // 1. Kiểm tra nhanh & chính xác tuyệt đối qua TvWindowManager (quét cửa sổ & YouTubeTV_Profile trong 80ms)
   if (fs.existsSync(tvWindowManagerPath)) {
     return new Promise<boolean>((resolve) => {
-      const proc = spawn(tvWindowManagerPath, ['status'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      const proc = spawn(tvWindowManagerPath, ['status'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
       let out = '';
       proc.stdout?.on('data', d => { out += d.toString(); });
       proc.on('close', () => {
@@ -884,7 +885,7 @@ function launchKioskBrowser(display: DisplayInfo) {
 
   const browserBin = candidates[0] || 'chrome.exe';
   try {
-    const child = spawn(browserBin, commonArgs, { detached: true, stdio: 'ignore' });
+    const child = spawn(browserBin, commonArgs, { detached: true, stdio: 'ignore', windowsHide: true });
     child.unref();
   } catch (err) {
     console.error('[Launch Kiosk Error]', err);
@@ -1778,7 +1779,8 @@ app.post('/api/quit', async (req, res) => {
     // Đóng cửa sổ trình duyệt Kiosk được mở bởi start.bat (YouTubeTV_Profile) mà không ảnh hưởng trình duyệt cá nhân
     if (process.platform === 'win32') {
       exec(
-        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`,
+        `powershell -WindowStyle Hidden -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`,
+        { windowsHide: true },
         () => {
           process.exit(0);
         }

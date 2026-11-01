@@ -34,6 +34,7 @@ call npx esbuild server.ts --bundle --platform=node --format=esm --packages=exte
 echo [3/5] Dang bien dich C# Native Launcher YouTubeTV.exe va TvWindowManager.exe...
 call C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /r:System.Management.dll /r:"C:\Windows\Microsoft.NET\assembly\GAC_MSIL\UIAutomationClient\v4.0_4.0.0.0__31bf3856ad364e35\UIAutomationClient.dll" /r:"C:\Windows\Microsoft.NET\assembly\GAC_MSIL\UIAutomationTypes\v4.0_4.0.0.0__31bf3856ad364e35\UIAutomationTypes.dll" /out:bin\TvWindowManager.exe bin\TvWindowManager.cs
 call C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /win32icon:resources\app.ico /out:resources\YouTubeTV.exe resources\Launcher.cs
+copy /Y resources\YouTubeTV.exe YouTubeTV.exe >nul
 
 echo [4/5] Dang chuan bi thu muc build-staging...
 if not exist build-staging mkdir build-staging

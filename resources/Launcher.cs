@@ -12,7 +12,17 @@ namespace YouTubeTVReceiver
         [STAThread]
         static void Main()
         {
-            string appDir = AppDomain.CurrentDomain.BaseDirectory;
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            string appDir = exeDir;
+
+            // Hỗ trợ trường hợp chạy từ thư mục con resources\YouTubeTV.exe trong thư mục mã nguồn
+            if (!File.Exists(Path.Combine(appDir, "server.mjs")) &&
+                !File.Exists(Path.Combine(appDir, "server.ts")) &&
+                File.Exists(Path.Combine(appDir, "..", "server.ts")))
+            {
+                appDir = Path.GetFullPath(Path.Combine(appDir, ".."));
+            }
+
             Environment.CurrentDirectory = appDir;
 
             // 1. Locate Node.js (prefer local portable node.exe, then system node)
@@ -26,30 +36,51 @@ namespace YouTubeTVReceiver
                 nodePath = "node";
             }
 
-            string serverScript = Path.Combine(appDir, "server.mjs");
-            if (!File.Exists(serverScript))
+            string serverArgs = "";
+            string serverMjs = Path.Combine(appDir, "server.mjs");
+            string stagingMjs = Path.Combine(appDir, "build-staging", "server.mjs");
+            string distServerMjs = Path.Combine(appDir, "dist-server", "server.mjs");
+            string tsxCli = Path.Combine(appDir, "node_modules", "tsx", "dist", "cli.mjs");
+            string serverTs = Path.Combine(appDir, "server.ts");
+
+            if (File.Exists(serverMjs))
             {
-                serverScript = Path.Combine(appDir, "dist-server", "server.mjs");
+                serverArgs = "\"" + serverMjs + "\"";
+            }
+            else if (File.Exists(stagingMjs))
+            {
+                serverArgs = "\"" + stagingMjs + "\"";
+            }
+            else if (File.Exists(distServerMjs))
+            {
+                serverArgs = "\"" + distServerMjs + "\"";
+            }
+            else if (File.Exists(tsxCli) && File.Exists(serverTs))
+            {
+                serverArgs = "\"" + tsxCli + "\" \"" + serverTs + "\"";
             }
 
             // 2. Check if server is already running on port 8547
             bool serverRunning = IsServerReady();
             Process nodeProc = null;
 
-            if (!serverRunning && File.Exists(serverScript))
+            if (!serverRunning && !string.IsNullOrEmpty(serverArgs))
             {
                 try
                 {
                     ProcessStartInfo psiNode = new ProcessStartInfo
                     {
                         FileName = nodePath,
-                        Arguments = "\"" + serverScript + "\"",
+                        Arguments = serverArgs,
                         WorkingDirectory = appDir,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         WindowStyle = ProcessWindowStyle.Hidden
                     };
-                    psiNode.EnvironmentVariables["NODE_ENV"] = "production";
+                    if (File.Exists(Path.Combine(appDir, "dist", "index.html")))
+                    {
+                        psiNode.EnvironmentVariables["NODE_ENV"] = "production";
+                    }
                     nodeProc = Process.Start(psiNode);
                 }
                 catch (Exception ex)
@@ -123,6 +154,25 @@ namespace YouTubeTVReceiver
                         using (wakeReq.GetResponse()) { }
                     }
                     catch { }
+
+                    try
+                    {
+                        string winMgr = Path.Combine(appDir, "bin", "TvWindowManager.exe");
+                        if (File.Exists(winMgr))
+                        {
+                            ProcessStartInfo psiRestore = new ProcessStartInfo
+                            {
+                                FileName = winMgr,
+                                Arguments = "restore",
+                                WorkingDirectory = appDir,
+                                UseShellExecute = false,
+                                CreateNoWindow = true,
+                                WindowStyle = ProcessWindowStyle.Hidden
+                            };
+                            Process.Start(psiRestore);
+                        }
+                    }
+                    catch { }
                     return;
                 }
             }
@@ -142,7 +192,8 @@ namespace YouTubeTVReceiver
             {
                 FileName = browserPath,
                 Arguments = chromeArgs,
-                UseShellExecute = false
+                UseShellExecute = false,
+                CreateNoWindow = true
             };
 
             try

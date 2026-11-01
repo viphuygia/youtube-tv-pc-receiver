@@ -1,54 +1,56 @@
 @echo off
 chcp 65001 >nul
-title YouTube TV Receiver for Windows
-cls
 
-echo ========================================================
-echo   YOUTUBE TV RECEIVER CHO WINDOWS
-echo   Trai Nghiem Smart TV va Cast iPhone Khong Can Chuot
-echo ========================================================
-echo.
+:: 1. Uu tien chay Native GUI Launcher (YouTubeTV.exe) de an hoan toan cua so Terminal CMD
+if exist "%~dp0YouTubeTV.exe" (
+    start "" "%~dp0YouTubeTV.exe"
+    exit
+)
+if exist "%~dp0resources\YouTubeTV.exe" (
+    start "" "%~dp0resources\YouTubeTV.exe"
+    exit
+)
+
+:: 2. Neu chua bien dich YouTubeTV.exe, tu dong khoi chay lai script o che do an (WindowStyle Hidden)
+if /i not "%~1"=="--hidden" (
+    powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath '%~f0' -ArgumentList '--hidden' -WorkingDirectory '%~dp0' -WindowStyle Hidden"
+    exit
+)
+
+cd /d "%~dp0"
 
 where node >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [LOI] May tinh chua cai dat Node.js!
-    echo Vui long tai Node.js tu https://nodejs.org roi thu lai.
-    pause
-    exit /b
+    exit /b 1
 )
 
 if not exist node_modules (
-    echo [1/3] Dang cai dat thu vien lan dau...
-    call npm install --legacy-peer-deps
+    call npm install --legacy-peer-deps >nul 2>&1
 )
 
-echo [1/3] Kiem tra may chu TV Receiver...
 curl -s -f http://localhost:8547/api/status >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Dang khoi dong may chu TV Receiver...
-    start /b cmd /c "npx tsx server.ts"
+    powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c npx tsx server.ts' -WorkingDirectory '%~dp0' -WindowStyle Hidden"
 )
 
-echo [2/3] Dang cho may chu khoi dong tren cong 8547...
+set /a WAIT_COUNT=0
 :WAIT_SERVER
 curl -s -f http://localhost:8547/api/status >nul 2>&1
 if %errorlevel% neq 0 (
+    set /a WAIT_COUNT+=1
+    if %WAIT_COUNT% gtr 30 exit /b 1
     ping 127.0.0.1 -n 2 >nul
     goto WAIT_SERVER
 )
-echo [OK] May chu da san sang!
 
 set "KIOSK_RUNNING="
 for /f "delims=" %%i in ('curl -s http://localhost:8547/api/is-kiosk-running') do set "KIOSK_RUNNING=%%i"
 echo %KIOSK_RUNNING% | findstr /i "true" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo [OK] Cua so YouTube TV da dang chay! Dang danh thuc va dua len dau...
     curl -s -X POST http://localhost:8547/api/standby -H "Content-Type: application/json" -d "{\"standby\":false}" >nul 2>&1
     if exist bin\TvWindowManager.exe bin\TvWindowManager.exe restore >nul 2>&1
-    goto SUCCESS
+    exit /b 0
 )
-
-echo [3/3] Dang mo TV o che do Toan man hinh va Tu dong phat...
 
 set "CHROME_PATH="
 if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
@@ -66,40 +68,13 @@ set FLAGS=--user-data-dir="%TEMP%\YouTubeTV_Profile" --profile-directory=Default
 
 if defined CHROME_PATH (
     start "" "%CHROME_PATH%" %FLAGS%
-    goto SUCCESS
+    exit /b 0
 )
 
 if defined EDGE_PATH (
     start "" "%EDGE_PATH%" %FLAGS%
-    goto SUCCESS
+    exit /b 0
 )
 
 start chrome.exe %FLAGS% || start msedge.exe %FLAGS%
-
-:SUCCESS
-echo.
-echo ========================================================
-echo   TV DA SAN SANG HOAT DONG!
-echo   * Ten hien thi tren iPhone: "Youtube TV (%COMPUTERNAME%)"
-echo   * Che do tu dong phat (Autoplay): DA BAT
-echo   * Che do toan man hinh (Kiosk): DA BAT
-echo   ----------------------------------------------------
-echo   * Nhan phim bat ky de TAT TOAN BO TV va Service chay ngam.
-echo   * Hoac ban co the chay stop.bat / tat-tv.bat bat ky luc nao.
-echo ========================================================
-echo.
-pause
-echo.
-echo [!] Dang tat toan bo TV va giai phong moi tien trinh chay ngam...
-call :CLEANUP
-echo [OK] Da tat toan bo TV thanh cong!
-ping 127.0.0.1 -n 3 >nul
-exit /b
-
-:CLEANUP
-curl -s -m 2 -X POST http://localhost:8547/api/quit >nul 2>&1
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8547') do (
-    if not "%%a"=="" if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
-)
-goto :eof
+exit /b 0
