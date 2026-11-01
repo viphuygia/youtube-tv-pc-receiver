@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Automation;
 
 public class TvWindowManager {
+  public static int DetectedProcessCount = 0;
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
   [DllImport("user32.dll", SetLastError = true)]
@@ -90,7 +92,8 @@ public class TvWindowManager {
       if (tabs != null && tabs.Count > 0) {
         foreach (AutomationElement tab in tabs) {
           string name = tab.Current.Name ?? "";
-          if (name.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) >= 0) {
+          if (name.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 ||
+              name.IndexOf("Trải Nghiệm TV Leanback", StringComparison.OrdinalIgnoreCase) >= 0) {
             object patternObj;
             if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out patternObj)) {
               ((SelectionItemPattern)patternObj).Select();
@@ -109,6 +112,23 @@ public class TvWindowManager {
   public static List<IntPtr> FindTargetWindows() {
     IntPtr hDesk = AttachToDefaultDesktop();
     List<IntPtr> list = new List<IntPtr>();
+
+    // 1. Quét tìm PID của trình duyệt chạy với profile riêng YouTubeTV_Profile
+    HashSet<uint> profilePids = new HashSet<uint>();
+    try {
+      using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'chrome.exe' OR Name = 'msedge.exe'")) {
+        foreach (ManagementObject obj in searcher.Get()) {
+          object cmdObj = obj["CommandLine"];
+          if (cmdObj != null) {
+            string cmdLine = cmdObj.ToString();
+            if (cmdLine.IndexOf("YouTubeTV_Profile", StringComparison.OrdinalIgnoreCase) >= 0) {
+              profilePids.Add(Convert.ToUInt32(obj["ProcessId"]));
+            }
+          }
+        }
+      }
+    } catch {}
+    DetectedProcessCount = profilePids.Count;
 
     try {
       EnumWindowsProc checkWindow = (hWnd, lParam) => {
@@ -134,12 +154,23 @@ public class TvWindowManager {
             return true;
           }
 
-          bool isBrowser = cls.StartsWith("Chrome_WidgetWin");
-          bool matchTitle = title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            title.IndexOf("YouTube-TV", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            (isBrowser && title.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) >= 0);
+          uint winPid;
+          GetWindowThreadProcessId(hWnd, out winPid);
 
-          if (matchTitle && !list.Contains(hWnd)) {
+          bool match = false;
+          if (profilePids.Count > 0) {
+            // Khi có profile YouTubeTV_Profile đang chạy, chỉ bắt chính xác cửa sổ của profile này
+            match = profilePids.Contains(winPid);
+          } else {
+            // Khi không tìm thấy profile, chỉ khớp tiêu đề chính xác của ứng dụng TV
+            match = title.IndexOf("YouTube TV trên máy tính Windows", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    title.IndexOf("Trải Nghiệm TV Leanback PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 && 
+                     title.IndexOf("Google Chrome", StringComparison.OrdinalIgnoreCase) < 0 && 
+                     title.IndexOf("Edge", StringComparison.OrdinalIgnoreCase) < 0);
+          }
+
+          if (match && !list.Contains(hWnd)) {
             list.Add(hWnd);
           }
         } catch {}
@@ -160,11 +191,21 @@ public class TvWindowManager {
           if (pName == "chrome" || pName == "msedge") {
             IntPtr h = proc.MainWindowHandle;
             if (h != IntPtr.Zero && !list.Contains(h)) {
-              StringBuilder sb = new StringBuilder(512);
-              GetWindowText(h, sb, 512);
-              string title = sb.ToString();
-              if (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                  title.IndexOf("YouTube", StringComparison.OrdinalIgnoreCase) >= 0) {
+              uint pId = (uint)proc.Id;
+              bool match = false;
+              if (profilePids.Count > 0) {
+                match = profilePids.Contains(pId);
+              } else {
+                StringBuilder sb = new StringBuilder(512);
+                GetWindowText(h, sb, 512);
+                string title = sb.ToString();
+                match = title.IndexOf("YouTube TV trên máy tính Windows", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        title.IndexOf("Trải Nghiệm TV Leanback PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 && 
+                         title.IndexOf("Google Chrome", StringComparison.OrdinalIgnoreCase) < 0 && 
+                         title.IndexOf("Edge", StringComparison.OrdinalIgnoreCase) < 0);
+              }
+              if (match) {
                 list.Add(h);
               }
             }
@@ -259,6 +300,7 @@ public class TvWindowManager {
       EnumWindows(dumpProc, IntPtr.Zero);
     } else {
       Console.WriteLine("FOUND:" + hwnds.Count);
+      Console.WriteLine("PROCS:" + DetectedProcessCount);
       foreach (var hwndItem in hwnds) {
         StringBuilder sbTitle = new StringBuilder(256);
         GetWindowText(hwndItem, sbTitle, 256);

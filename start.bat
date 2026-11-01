@@ -42,8 +42,9 @@ set "KIOSK_RUNNING="
 for /f "delims=" %%i in ('curl -s http://localhost:8547/api/is-kiosk-running') do set "KIOSK_RUNNING=%%i"
 echo %KIOSK_RUNNING% | findstr /i "true" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo [OK] Cua so YouTube TV da dang chay! Dang danh thuc va khoi phuc cua so...
+    echo [OK] Cua so YouTube TV da dang chay! Dang danh thuc va dua len dau...
     curl -s -X POST http://localhost:8547/api/standby -H "Content-Type: application/json" -d "{\"standby\":false}" >nul 2>&1
+    if exist bin\TvWindowManager.exe bin\TvWindowManager.exe restore >nul 2>&1
     goto SUCCESS
 )
 
@@ -82,7 +83,23 @@ echo   TV DA SAN SANG HOAT DONG!
 echo   * Ten hien thi tren iPhone: "Youtube TV (%COMPUTERNAME%)"
 echo   * Che do tu dong phat (Autoplay): DA BAT
 echo   * Che do toan man hinh (Kiosk): DA BAT
-echo   * Dong cua so nay khi ban muon tat TV.
+echo   ----------------------------------------------------
+echo   * Nhan phim bat ky de TAT TOAN BO TV va Service chay ngam.
+echo   * Hoac ban co the chay stop.bat / tat-tv.bat bat ky luc nao.
 echo ========================================================
 echo.
 pause
+echo.
+echo [!] Dang tat toan bo TV va giai phong moi tien trinh chay ngam...
+call :CLEANUP
+echo [OK] Da tat toan bo TV thanh cong!
+ping 127.0.0.1 -n 3 >nul
+exit /b
+
+:CLEANUP
+curl -s -m 2 -X POST http://localhost:8547/api/quit >nul 2>&1
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8547') do (
+    if not "%%a"=="" if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
+)
+goto :eof

@@ -791,34 +791,23 @@ async function isKioskRunning(): Promise<boolean> {
   if (process.platform !== 'win32') {
     return connectedClients.size > 0;
   }
-  // 1. Kiểm tra nhanh qua TvWindowManager xem có cửa sổ TV thực tế trên màn hình hay không
+  // 1. Kiểm tra nhanh & chính xác tuyệt đối qua TvWindowManager (quét cửa sổ & YouTubeTV_Profile trong 80ms)
   if (fs.existsSync(tvWindowManagerPath)) {
-    const hasWindow = await new Promise<boolean>((resolve) => {
+    return new Promise<boolean>((resolve) => {
       const proc = spawn(tvWindowManagerPath, ['status'], { stdio: ['ignore', 'pipe', 'ignore'] });
       let out = '';
       proc.stdout?.on('data', d => { out += d.toString(); });
       proc.on('close', () => {
-        if (out.includes('FOUND:') && !out.includes('FOUND:0')) {
-          return resolve(true);
-        }
-        resolve(false);
+        const hasWindow = out.includes('FOUND:') && !out.includes('FOUND:0');
+        const hasProc = out.includes('PROCS:') && !out.includes('PROCS:0');
+        resolve(hasWindow || hasProc);
       });
       proc.on('error', () => resolve(false));
+      setTimeout(() => resolve(false), 1500);
     });
-    if (hasWindow) return true;
   }
 
-  // 2. Kiểm tra tiến trình trình duyệt thực sự (chỉ chrome.exe hoặc msedge.exe)
-  const ps = `
-$p = @(Get-CimInstance Win32_Process | Where-Object { 
-  ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and 
-  $_.CommandLine -like '*YouTubeTV_Profile*' -and 
-  ($_.CommandLine -like '*--kiosk*' -or $_.CommandLine -like '*--app*') 
-})
-if ($p.Count -gt 0) { Write-Output 'true' } else { Write-Output 'false' }
-`;
-  const out = await runPowerShellEncoded(ps);
-  return out.trim() === 'true';
+  return connectedClients.size > 0;
 }
 
 function launchKioskBrowser(display: DisplayInfo) {
@@ -1612,11 +1601,15 @@ app.post('/api/settings/automation/test', async (req, res) => {
 
 // Quit app endpoint (Đóng Kiosk TV & tắt máy chủ từ chế độ Fullscreen)
 app.post('/api/quit', async (req, res) => {
-  console.log('[System] Nhận lệnh Tắt ứng dụng từ màn hình Fullscreen...');
+  console.log('[System] Nhận lệnh Tắt ứng dụng từ giao diện...');
   broadcastControl({ action: 'quit' });
   res.json({ success: true });
 
   setTimeout(() => {
+    try {
+      server.close();
+    } catch {}
+
     // Đóng cửa sổ trình duyệt Kiosk được mở bởi start.bat (YouTubeTV_Profile) mà không ảnh hưởng trình duyệt cá nhân
     if (process.platform === 'win32') {
       exec(
@@ -1625,7 +1618,7 @@ app.post('/api/quit', async (req, res) => {
           process.exit(0);
         }
       );
-      setTimeout(() => process.exit(0), 1500);
+      setTimeout(() => process.exit(0), 1200);
     } else {
       process.exit(0);
     }

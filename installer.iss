@@ -40,6 +40,7 @@ Source: "build-staging\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\resources\app.ico"
+Name: "{autoprograms}\Stop YouTube TV (Tat TV)"; Filename: "{app}\stop.bat"; IconFilename: "{app}\resources\app.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\resources\app.ico"; Tasks: desktopicon
 
 [Registry]

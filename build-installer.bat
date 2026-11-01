@@ -31,7 +31,8 @@ if %errorlevel% neq 0 (
 echo [2/5] Dang bundle backend server.ts...
 call npx esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile="build-staging\server.mjs"
 
-echo [3/5] Dang bien dich C# Native Launcher YouTubeTV.exe...
+echo [3/5] Dang bien dich C# Native Launcher YouTubeTV.exe va TvWindowManager.exe...
+call C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /r:System.Management.dll /r:"C:\Windows\Microsoft.NET\assembly\GAC_MSIL\UIAutomationClient\v4.0_4.0.0.0__31bf3856ad364e35\UIAutomationClient.dll" /r:"C:\Windows\Microsoft.NET\assembly\GAC_MSIL\UIAutomationTypes\v4.0_4.0.0.0__31bf3856ad364e35\UIAutomationTypes.dll" /out:bin\TvWindowManager.exe bin\TvWindowManager.cs
 call C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /win32icon:resources\app.ico /out:resources\YouTubeTV.exe resources\Launcher.cs
 
 echo [4/5] Dang chuan bi thu muc build-staging...
@@ -46,6 +47,8 @@ copy /Y resources\YouTubeTV.exe build-staging\YouTubeTV.exe >nul
 copy /Y resources\app.ico build-staging\resources\app.ico >nul
 copy /Y bin\TvWindowManager.exe build-staging\bin\TvWindowManager.exe >nul
 copy /Y bin\TvWindowManager.cs build-staging\bin\TvWindowManager.cs >nul
+copy /Y stop.bat build-staging\stop.bat >nul
+copy /Y tat-tv.bat build-staging\tat-tv.bat >nul
 
 where node >nul 2>nul
 if %errorlevel% equ 0 (
@@ -65,4 +68,3 @@ if %errorlevel% equ 0 (
 ) else (
     echo [LOI] Bien dich bo cai dat that bai
 )
-pause

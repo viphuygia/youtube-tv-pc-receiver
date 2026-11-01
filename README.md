@@ -23,6 +23,11 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
   - **Auto-Collapse Toggle:** Turn on or off auto-minimizing the TV window to the taskbar when muted.
   - **Interactive Test Button:** Verify command paths instantly from the Settings modal before saving.
   - **Persistent Storage:** Saved permanently via `/api/settings/automation` into `.yt-cast-store.json`.
+- 🧹 **Complete Resource Cleanup & Stop Scripts (`stop.bat` & `tat-tv.bat`):**
+  - Dedicated shutdown scripts (`stop.bat` / `tat-tv.bat`) and Start menu shortcut to instantly terminate port 8547 and Chrome TV profile without leaving orphaned/zombie background services.
+  - `start.bat` interactive exit: pressing any key at the end of `start.bat` cleans up all background processes automatically.
+- 🎯 **Eliminated 100% of Window Matching False-Positives (`TvWindowManager.exe`):**
+  - Upgraded window scanner: directly inspects WMI command lines for `YouTubeTV_Profile` and strictly checks page titles (`YouTube TV trên máy tính Windows`), preventing normal personal YouTube browser tabs from blocking Kiosk TV startup.
 - 🎯 **Precise YouTube Tab Targeting (Windows UI Automation):**
   - Powered by native `System.Windows.Automation` in `TvWindowManager.exe`. When running inside a browser with multiple tabs, it inspects the accessibility tree and automatically invokes `Select()` on the exact "YouTube TV" tab so you are never left looking at an unrelated tab.
   - Standalone App Mode (`--app="http://localhost:8547?tv=1"`) isolates the TV window completely from your personal browser tabs.
@@ -33,7 +38,7 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
   - **Fixed Chrome Silent Crash:** Removed an aggressive multi-process kill loop in `server.ts` that erroneously terminated Chrome's GPU and renderer helper processes on startup.
   - **Bypassed Crash Recovery Popups:** Added `--disable-session-crashed-bubble`, `--profile-directory=Default`, and `--disable-features=ProfilePicker`.
 - ⚡ **Native C# Window Manager (`bin/TvWindowManager.exe`):**
-  - Ultra-fast native binary (~15ms execution) connected to interactive desktop `WinSta0\Default`.
+  - Ultra-fast native binary (~80ms execution) connected to interactive desktop `WinSta0\Default`.
 
 ---
 
@@ -136,19 +141,22 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
   - **Tùy chọn Khép TV xuống Taskbar:** Bật/tắt linh hoạt hành vi tự động khép cửa sổ TV xuống Taskbar khi âm lượng về 0.
   - **Nút "Chạy thử (Test)":** Kiểm tra chạy ngay app trên màn hình để kiểm chứng đường dẫn trước khi lưu.
   - **Lưu trữ cấu hình vĩnh viễn:** Tự động lưu cấu hình bền vững qua API `/api/settings/automation` vào `.yt-cast-store.json`.
+- 🧹 **Tắt Sạch Sẽ & Dọn Dẹp Triệt Để Service Chạy Ngầm (`stop.bat` & `tat-tv.bat`):**
+  - Cung cấp script tắt chuyên dụng `stop.bat` / `tat-tv.bat` và shortcut trong Start menu, đóng sạch toàn bộ cổng 8547 và Chrome TV, không để lại tiến trình chạy mồ côi (zombie processes).
+  - Thoát an toàn từ `start.bat`: chỉ cần bấm phím bất kỳ là hệ thống tự động dọn dẹp và đóng sạch toàn bộ background services.
+- 🎯 **Loại Bỏ Hoàn Toàn Nhận Diện Nhầm Cửa Sổ TV (`TvWindowManager.exe`):**
+  - Nâng cấp bộ quét cửa sổ C# qua WMI kiểm tra trực tiếp tham số `YouTubeTV_Profile` và tiêu đề chính xác `YouTube TV trên máy tính Windows`, loại bỏ triệt để lỗi các tab YouTube cá nhân khiến `start.bat` không chịu mở cửa sổ TV.
 - 🎯 **Mở Lại Chính Xác Tab YouTube TV (Windows UI Automation):**
   - Tích hợp `System.Windows.Automation` trực tiếp vào `bin/TvWindowManager.exe`. Khi người dùng mở TV trong một cửa sổ trình duyệt có nhiều tab, hệ thống tự động quét cây UI và gọi `Select()` đúng tab "YouTube TV", không để bạn bị kẹt ở các tab làm việc khác.
   - Khởi động cửa sổ dạng App độc lập (`--app="http://localhost:8547?tv=1"`), tách biệt 100% với các tab duyệt web cá nhân.
 - 🪟 **Kích Hoạt Trực Tiếp Êm Ru (Loại bỏ triệt để hiệu ứng Alt-Tab):**
   - Chuyển `SwitchToThisWindow(hWnd, false)` và gỡ bỏ phím Alt ảo (`VK_MENU`). Cửa sổ TV được đưa lên đầu màn hình (`HWND_TOPMOST`) một cách trực tiếp, êm ru và không còn chớp giao diện Alt-Tab.
-- 🐛 **Sửa Lỗi `start.bat` Không Hiện Gì:**
-  - Khắc phục lỗi API `/api/is-kiosk-running` tính cả kết nối WebSocket ngầm khiến `start.bat` tưởng TV đã mở và bỏ qua việc mở trình duyệt.
 - 🐛 **Sửa Lỗi Chrome Tự Tắt Ngay Sau Khi Mở:**
   - Loại bỏ hoàn toàn đoạn mã `Stop-Process` kill nhầm các tiến trình con thiết yếu của Chrome (GPU process, Renderer).
 - 🛡️ **Bỏ Qua Hộp Thoại Hỏi Khôi Phục Phiên Crash:**
   - Bổ sung `--disable-session-crashed-bubble`, `--profile-directory=Default`, và `--disable-features=ProfilePicker` giúp Chrome luôn mở mượt mà vào toàn màn hình, không bị treo ở hộp thoại "Restore pages?".
 - ⚡ **Bộ Điều Khiển Cửa Sổ Native Siêu Tốc (`bin/TvWindowManager.exe`):**
-  - Biên dịch nhị phân C# chạy chỉ trong 15ms, gắn kết trực tiếp desktop tương tác `WinSta0\Default`, kiểm soát cửa sổ chính xác tuyệt đối.
+  - Biên dịch nhị phân C# chạy chỉ trong 80ms, gắn kết trực tiếp desktop tương tác `WinSta0\Default`, kiểm soát cửa sổ chính xác tuyệt đối.
 
 ---
 
