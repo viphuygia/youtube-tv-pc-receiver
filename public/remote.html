@@ -215,14 +215,62 @@
       </div>
     </div>
 
-    <!-- Gesture Trigger Tip -->
-    <div class="bg-gradient-to-r from-amber-950/20 to-slate-900/60 border border-amber-500/30 rounded-2xl p-3.5 space-y-1.5 text-xs text-amber-200/90 shadow-sm">
-      <div class="flex items-center gap-1.5 font-bold text-amber-300">
-        <span>⚡ Phím tắt ẩn TV từ YouTube điện thoại:</span>
+    <!-- Workaround Triggers for Standby / Hide TV -->
+    <div class="bg-gradient-to-r from-slate-900 via-[#101524] to-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-md">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+          <span>⚡ CÁCH ẨN TV TRỰC TIẾP TỪ IPHONE:</span>
+        </span>
+        <span class="text-[10px] text-slate-400 font-mono">3 Cách Tiện Lợi</span>
       </div>
-      <p class="text-[11px] leading-relaxed text-slate-300">
-        Bấm nút <strong>Play / Pause 5 lần liên tục trong 5 giây</strong> ngay trên app YouTube hoặc màn hình khóa điện thoại để lập tức ẩn TV xuống Taskbar và dừng kết nối video!
-      </p>
+
+      <!-- Option 1: Seek to End in YouTube App -->
+      <div class="bg-black/40 border border-slate-800/80 rounded-xl p-3 space-y-1">
+        <div class="text-xs font-bold text-white flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 text-[10px] font-mono border border-red-800/40">Cách 1</span>
+          <span>Tua về cuối video trong app YouTube (Seek to End)</span>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-relaxed">
+          Ngay trong app YouTube trên iPhone: chỉ cần <strong>kéo thanh đỏ tua về cuối video (hết bài)</strong>. TV sẽ lập tức dừng phát và tự động thu nhỏ ẩn xuống Taskbar!
+        </p>
+      </div>
+
+      <!-- Option 2: iOS Shortcut / Siri / Control Center -->
+      <div class="bg-black/40 border border-slate-800/80 rounded-xl p-3 space-y-2">
+        <div class="text-xs font-bold text-white flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-blue-950 text-blue-400 text-[10px] font-mono border border-blue-800/40">Cách 2</span>
+          <span>Phím tắt iOS (Apple Shortcut) - 1 Chạm từ Màn hình khóa / Siri</span>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-relaxed">
+          Tạo 1 Phím tắt với hành động <em>"Lấy nội dung của URL"</em>. Có thể gán vào <strong>Trung tâm điều khiển</strong>, <strong>Màn hình khóa</strong>, hoặc gõ mặt lưng iPhone 2 lần:
+        </p>
+        <div class="flex items-center gap-2">
+          <input 
+            id="shortcut-url-input" 
+            type="text" 
+            readonly 
+            class="flex-1 bg-black/80 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-cyan-300 select-all"
+            value=""
+          />
+          <button 
+            onclick="copyShortcutUrl()" 
+            class="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-[11px] font-bold shrink-0 transition-all shadow-sm"
+          >
+            📋 Sao chép
+          </button>
+        </div>
+      </div>
+
+      <!-- Option 3: Web Remote Add to Home Screen -->
+      <div class="bg-black/40 border border-slate-800/80 rounded-xl p-3 space-y-1">
+        <div class="text-xs font-bold text-white flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 text-[10px] font-mono border border-emerald-800/40">Cách 3</span>
+          <span>Thêm Remote này ra Màn hình chính iPhone (PWA)</span>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-relaxed">
+          Trên Safari iPhone: Bấm nút <strong>Chia sẻ (biểu tượng mũi tên) &gt; Thêm vào MH chính</strong>. Bấm nút <strong>"🌙 Ẩn TV"</strong> to ở trên bất cứ lúc nào!
+        </p>
+      </div>
     </div>
 
     <!-- TV Code Assistant -->
@@ -537,6 +585,24 @@
         .catch(() => {});
     }
 
+    function initShortcutUrl() {
+      const urlBox = document.getElementById('shortcut-url-input');
+      if (urlBox) {
+        urlBox.value = `${window.location.origin}/api/hide`;
+      }
+    }
+
+    async function copyShortcutUrl() {
+      const url = `${window.location.origin}/api/hide`;
+      try {
+        await navigator.clipboard.writeText(url);
+        alert('Đã sao chép URL: ' + url + '\n\nBạn có thể dán vào Phím tắt (Shortcuts) trên iPhone để tạo nút 1 chạm Ẩn TV!');
+      } catch {
+        prompt('Sao chép link này để dán vào Phím tắt iPhone:', url);
+      }
+    }
+
+    initShortcutUrl();
     syncStatus();
     setInterval(syncStatus, 2000);
 

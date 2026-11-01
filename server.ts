@@ -162,7 +162,27 @@ async function restoreKioskWindow() {
   await moveKioskWindowToDisplay(target);
 }
 
+let autoStandbyTimer: NodeJS.Timeout | null = null;
+
+function scheduleAutoStandby(reason: string, delayMs: number = 4000) {
+  cancelAutoStandby();
+  autoStandbyTimer = setTimeout(() => {
+    if (!isVideoPlaying && !isStandby) {
+      console.log(`[Auto Standby] Tự động kích hoạt Chế độ ẩn TV: ${reason}`);
+      enterStandbyMode(`Tự động: ${reason}`);
+    }
+  }, delayMs);
+}
+
+function cancelAutoStandby() {
+  if (autoStandbyTimer) {
+    clearTimeout(autoStandbyTimer);
+    autoStandbyTimer = null;
+  }
+}
+
 async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
+  cancelAutoStandby();
   console.log(`[YouTube Cast Standby] Kích hoạt Chế độ chờ (Standby) [Lý do: ${reason}]. Thu nhỏ ẩn cửa sổ PC.`);
   isStandby = true;
   isVideoPlaying = false;
@@ -173,27 +193,8 @@ async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
   await minimizeKioskWindow();
 }
 
-// Bộ đếm nhận diện phím tắt: Bấm Play/Pause (hoặc Start/Stop) 5 lần trong vòng 5 giây từ iPhone để ẩn TV
-let playPauseTriggerTimestamps: number[] = [];
-
-function registerPlayPauseTrigger(source: string = 'điện thoại'): boolean {
-  const now = Date.now();
-  // Lọc chỉ giữ lại các lần bấm trong vòng 5 giây qua
-  playPauseTriggerTimestamps = playPauseTriggerTimestamps.filter(t => now - t <= 5000);
-  playPauseTriggerTimestamps.push(now);
-  console.log(`[Trigger Phím Tắt Ẩn TV] Nhận lệnh Play/Pause (${playPauseTriggerTimestamps.length}/5 lần trong 5s) [Nguồn: ${source}]`);
-
-  if (playPauseTriggerTimestamps.length >= 5) {
-    playPauseTriggerTimestamps = [];
-    console.log(`[Trigger Phím Tắt Ẩn TV] ĐÃ NHẬN ĐỦ 5 LẦN BẤM PLAY/PAUSE TRONG 5S! KÍCH HOẠT CHẾ ĐỘ ẨN TV.`);
-    enterStandbyMode('Phím tắt: Bấm Play/Pause 5 lần trong 5s từ điện thoại');
-    return true;
-  }
-  return false;
-}
-
 async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu phát') {
-  playPauseTriggerTimestamps = [];
+  cancelAutoStandby();
   console.log(`[YouTube Cast Standby] Thoát Chế độ chờ -> Hiện ứng dụng [Lý do: ${reason}].`);
   isStandby = false;
   broadcastStandbyState(false);
@@ -202,6 +203,8 @@ async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu ph
 }
 
 function broadcastVideo(videoData: typeof currentVideo) {
+  const wasStandby = isStandby;
+  cancelAutoStandby();
   isStandby = false;
   currentVideo = videoData;
   isVideoPlaying = videoData.isPlaying;
@@ -217,6 +220,9 @@ function broadcastVideo(videoData: typeof currentVideo) {
       client.send(message);
     }
   });
+  if (wasStandby) {
+    restoreKioskWindow().catch(() => {});
+  }
 }
 
 function broadcastControl(controlData: any) {
@@ -383,30 +389,38 @@ class WebCastPlayer extends Player {
       isVideoPlaying = false;
     }
     broadcastControl({ action: 'pause' });
-    registerPlayPauseTrigger('iPhone doPause');
     return true;
   }
 
   protected async doResume(): Promise<boolean> {
     console.log('[YouTube Cast from iPhone] Resume command');
+    cancelAutoStandby();
+    if (isStandby) {
+      exitStandbyMode('iPhone Resume').catch(() => {});
+    }
     positionLastUpdated = Date.now();
     isVideoPlaying = true;
     broadcastControl({ action: 'play' });
-    registerPlayPauseTrigger('iPhone doResume');
     return true;
   }
 
   protected async doStop(): Promise<boolean> {
     console.log('[YouTube Cast from iPhone] Stop/Transition command');
     isVideoPlaying = false;
-    // Không gửi lệnh dừng cứng màn hình để việc vuốt xuống tìm video khác hoặc chuyển bài diễn ra mượt mà
+    // Không dừng cứng giao diện khi vuốt chuyển video, chỉ lên lịch ẩn nếu sau 3s không có video nào
     return true;
   }
 
   protected async doSeek(position: number): Promise<boolean> {
     let target = Math.max(0, Math.floor(Number(position) || 0));
-    if (currentVideoDuration > 0 && target > currentVideoDuration) {
+    cancelAutoStandby();
+    // Workaround Cử chỉ: Nếu người dùng tua thanh thời gian về cuối video (hết bài) từ YouTube app -> Tự động ẩn TV
+    if (currentVideoDuration > 0 && target >= currentVideoDuration - 2) {
+      console.log(`[YouTube Cast Tua Hết Video] iPhone tua đến cuối video (${target}s / ${currentVideoDuration}s). Kích hoạt Chế độ ẩn TV.`);
       target = Math.max(0, currentVideoDuration - 1);
+      setTimeout(() => {
+        enterStandbyMode('Người dùng tua đến cuối video từ iPhone');
+      }, 500);
     }
     console.log(`[YouTube Cast Tua] iPhone yêu cầu tua tới: ${target}s (Duration: ${currentVideoDuration}s)`);
     currentPositionSeconds = target;
@@ -806,15 +820,21 @@ wss.on('connection', (ws: WebSocket) => {
         // Đồng bộ trạng thái Đang phát / Tạm dừng / Kết thúc từ trình phát YouTube
         if (typeof data.playerState === 'number') {
           if (data.playerState === 1 && !isVideoPlaying) {
+            cancelAutoStandby();
             isVideoPlaying = true;
             positionLastUpdated = Date.now();
             shouldNotifyLounge = true;
           } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 1500) {
             isVideoPlaying = false;
             shouldNotifyLounge = true;
-          } else if (data.playerState === 0 && currentVideoDuration > 0 && currentPositionSeconds >= currentVideoDuration - 3) {
-            // Video kết thúc -> tự động chuyển bài tiếp theo trong hàng đợi
-            ytPlayer.next().catch(() => {});
+          } else if (data.playerState === 0) {
+            // Video kết thúc: Kiểm tra nếu có bài tiếp theo trong hàng đợi thì phát, nếu không thì tự động ẩn TV sau 4 giây
+            if (ytPlayer.queue.videoIds.length > 1 && ytPlayer.queue.current?.id !== ytPlayer.queue.videoIds[ytPlayer.queue.videoIds.length - 1]) {
+              ytPlayer.next().catch(() => {});
+            } else {
+              console.log('[Player Sync] Video đã kết thúc và không còn bài tiếp theo trong hàng đợi. Sẽ tự động ẩn TV sau 4s...');
+              scheduleAutoStandby('Hết video và không có bài tiếp theo', 4000);
+            }
           }
         }
 
@@ -842,10 +862,6 @@ wss.on('connection', (ws: WebSocket) => {
       }
 
       if (data.type === 'control') {
-        if (data.action === 'play' || data.action === 'pause') {
-          registerPlayPauseTrigger('Remote / Web');
-        }
-
         if (data.action === 'setVolume' && typeof data.value === 'number') {
           currentVolumeLevel = Math.max(0, Math.min(100, Math.round(data.value)));
           isVolumeMuted = false;
@@ -1015,6 +1031,45 @@ app.post('/api/standby', async (req, res) => {
     }
   } else {
     await enterStandbyMode('Yêu cầu Chế độ chờ từ API / Web');
+  }
+  return res.json({ success: true, isStandby });
+});
+
+// 1-Tap endpoints cho iOS Shortcut / Siri / Home Screen Widget / Webhook (hỗ trợ cả GET và POST)
+app.get('/api/hide', async (req, res) => {
+  await enterStandbyMode('Yêu cầu từ iOS Shortcut / Webhook (/api/hide)');
+  return res.json({ success: true, isStandby: true });
+});
+
+app.post('/api/hide', async (req, res) => {
+  await enterStandbyMode('Yêu cầu từ iOS Shortcut / Webhook (/api/hide)');
+  return res.json({ success: true, isStandby: true });
+});
+
+app.get('/api/wake', async (req, res) => {
+  await exitStandbyMode('Yêu cầu từ iOS Shortcut / Webhook (/api/wake)');
+  return res.json({ success: true, isStandby: false });
+});
+
+app.post('/api/wake', async (req, res) => {
+  await exitStandbyMode('Yêu cầu từ iOS Shortcut / Webhook (/api/wake)');
+  return res.json({ success: true, isStandby: false });
+});
+
+app.get('/api/toggle', async (req, res) => {
+  if (isStandby) {
+    await exitStandbyMode('Toggle từ iOS Shortcut / Webhook');
+  } else {
+    await enterStandbyMode('Toggle từ iOS Shortcut / Webhook');
+  }
+  return res.json({ success: true, isStandby });
+});
+
+app.post('/api/toggle', async (req, res) => {
+  if (isStandby) {
+    await exitStandbyMode('Toggle từ iOS Shortcut / Webhook');
+  } else {
+    await enterStandbyMode('Toggle từ iOS Shortcut / Webhook');
   }
   return res.json({ success: true, isStandby });
 });
