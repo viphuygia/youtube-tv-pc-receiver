@@ -1,6 +1,6 @@
 {
   "name": "youtube-tv-pc-receiver",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Turn any Windows PC into a YouTube Smart TV Cast Receiver with DIAL/SSDP, Google Lounge, QR Remote, and Multi-Monitor Support",
   "private": true,
   "type": "module",

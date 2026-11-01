@@ -2,7 +2,7 @@
 ; Produces a standalone, single-file setup executable
 
 #define MyAppName "YouTube TV Receiver"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "viphuygia"
 #define MyAppURL "https://github.com/viphuygia/youtube-tv-pc-receiver"
 #define MyAppExeName "YouTubeTV.exe"
@@ -20,7 +20,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=dist-installer
-OutputBaseFilename=YouTube-TV-Receiver-Setup-v1.1.0
+OutputBaseFilename=YouTube-TV-Receiver-Setup-v1.1.1
 SetupIconFile=resources\app.ico
 UninstallDisplayIcon={app}\resources\app.ico
 Compression=lzma2/ultra64
