@@ -3,7 +3,7 @@ import {
   Cast, Smartphone, Play, Maximize2, Minimize2, 
   Volume2, VolumeX, CheckCircle2, Copy, ExternalLink,
   Laptop, RefreshCw, Terminal, QrCode, Globe, Power, Monitor,
-  Moon, Clock, Sparkles, Tv
+  Moon, Clock, Sparkles, Tv, Settings
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { translations, Lang } from './i18n';
@@ -59,6 +59,15 @@ export default function App() {
   });
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [showDisplayModal, setShowDisplayModal] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [automationSettings, setAutomationSettings] = useState({
+    onZeroVolume: '',
+    onWake: '',
+    collapseOnZeroVolume: true,
+    restoreOnWake: true,
+  });
+  const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
+  const [settingsNotice, setSettingsNotice] = useState<string>('');
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [selectedDisplay, setSelectedDisplay] = useState<DisplayInfo | null>(null);
   const [isSwitchingDisplay, setIsSwitchingDisplay] = useState<boolean>(false);
@@ -305,6 +314,74 @@ export default function App() {
         if (data.selectedDisplay) setSelectedDisplay(data.selectedDisplay);
       })
       .catch(() => {});
+  };
+
+  const fetchAutomationSettings = () => {
+    fetch('/api/settings/automation')
+      .then(res => res.json())
+      .then(data => {
+        if (data) {
+          setAutomationSettings({
+            onZeroVolume: data.onZeroVolume || '',
+            onWake: data.onWake || '',
+            collapseOnZeroVolume: data.collapseOnZeroVolume !== false,
+            restoreOnWake: data.restoreOnWake !== false,
+          });
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchAutomationSettings();
+  }, []);
+
+  const handleOpenSettingsModal = () => {
+    fetchAutomationSettings();
+    setSettingsNotice('');
+    setShowSettingsModal(true);
+  };
+
+  const handleSaveAutomation = async () => {
+    setIsSavingSettings(true);
+    setSettingsNotice('');
+    try {
+      const res = await fetch('/api/settings/automation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(automationSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSettingsNotice(t.savedSuccess);
+        setTimeout(() => setSettingsNotice(''), 3000);
+      }
+    } catch {
+      setSettingsNotice('Lỗi lưu cấu hình');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleTestCommand = async (command: string, trigger: string) => {
+    if (!command.trim()) return;
+    try {
+      const res = await fetch('/api/settings/automation/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command, trigger }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSettingsNotice(t.testSuccess + ` (${command})`);
+      } else {
+        setSettingsNotice(t.testError + ' ' + (data.error || data.reason));
+      }
+      setTimeout(() => setSettingsNotice(''), 4000);
+    } catch (e: any) {
+      setSettingsNotice(t.testError + ' ' + e.message);
+      setTimeout(() => setSettingsNotice(''), 4000);
+    }
   };
 
   const handleSelectDisplay = async (display: DisplayInfo) => {
@@ -726,6 +803,14 @@ export default function App() {
             </span>
           </button>
           <button
+            onClick={handleOpenSettingsModal}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
+            title={t.settingsBtn}
+          >
+            <Settings className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">{t.settingsBtn}</span>
+          </button>
+          <button
             onClick={() => setShowLocalGuide(!showLocalGuide)}
             className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-colors flex items-center gap-1.5"
           >
@@ -861,6 +946,15 @@ export default function App() {
                   >
                     <Monitor className="w-3.5 h-3.5 text-emerald-400" />
                     <span className="hidden sm:inline font-semibold">{t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}</span>
+                  </button>
+
+                  <button
+                    onClick={handleOpenSettingsModal}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-white backdrop-blur-md border border-slate-700/80 transition-all flex items-center gap-1.5 text-xs shadow-md"
+                    title={t.settingsBtn}
+                  >
+                    <Settings className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="hidden sm:inline font-semibold">{t.settingsBtn}</span>
                   </button>
 
                   <button
@@ -1055,6 +1149,17 @@ export default function App() {
                   <Monitor className="w-4 h-4 text-emerald-400" />
                   <span className="font-semibold text-slate-100">
                     {t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}
+                  </span>
+                </button>
+
+                <button
+                  onClick={handleOpenSettingsModal}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-blue-400/60"
+                  title={t.settingsBtn}
+                >
+                  <Settings className="w-4 h-4 text-blue-400" />
+                  <span className="font-semibold text-slate-100 hidden sm:inline">
+                    {t.settingsBtn}
                   </span>
                 </button>
 
@@ -1364,6 +1469,140 @@ export default function App() {
         </div>
       )}
 
+      {/* Modal Cài Đặt Tự Động Hóa & Custom Actions */}
+      {showSettingsModal && (
+        <div
+          className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setShowSettingsModal(false)}
+        >
+          <div
+            className="bg-[#0f1422] border-2 border-blue-500/50 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white text-base w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-colors"
+            >
+              ✕
+            </button>
+
+            <div className="flex items-center gap-2.5 text-blue-400 font-bold text-sm uppercase tracking-wider">
+              <Settings className="w-5 h-5" />
+              <span>{t.automationModalTitle}</span>
+            </div>
+
+            <p className="text-slate-300 text-xs leading-relaxed">
+              {t.automationModalDesc}
+            </p>
+
+            {settingsNotice && (
+              <div className="p-3 rounded-xl bg-blue-950/60 border border-blue-500/50 text-blue-200 text-xs flex items-center gap-2 animate-in fade-in">
+                <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="font-medium">{settingsNotice}</span>
+              </div>
+            )}
+
+            <div className="space-y-4 pt-1 max-h-[60vh] overflow-y-auto pr-1">
+              {/* Cấu hình khi Âm lượng về 0 */}
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                    <VolumeX className="w-4 h-4 text-amber-400" />
+                    <span>{t.onZeroVolumeLabel}</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400">{t.onZeroVolumeHelp}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={automationSettings.onZeroVolume}
+                    onChange={e => setAutomationSettings(s => ({ ...s, onZeroVolume: e.target.value }))}
+                    placeholder={t.onZeroVolumePlaceholder}
+                    className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleTestCommand(automationSettings.onZeroVolume, 'zero_volume')}
+                    disabled={!automationSettings.onZeroVolume.trim()}
+                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors shrink-0"
+                  >
+                    {t.testBtn}
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={automationSettings.collapseOnZeroVolume}
+                    onChange={e => setAutomationSettings(s => ({ ...s, collapseOnZeroVolume: e.target.checked }))}
+                    className="w-4 h-4 rounded accent-blue-500"
+                  />
+                  <span className="text-xs text-slate-300">{t.collapseOnZeroVolumeLabel}</span>
+                </label>
+              </div>
+
+              {/* Cấu hình khi Đánh thức / Tăng âm lượng */}
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <Volume2 className="w-4 h-4 text-emerald-400" />
+                    <span>{t.onWakeLabel}</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400">{t.onWakeHelp}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={automationSettings.onWake}
+                    onChange={e => setAutomationSettings(s => ({ ...s, onWake: e.target.value }))}
+                    placeholder={t.onWakePlaceholder}
+                    className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleTestCommand(automationSettings.onWake, 'wake')}
+                    disabled={!automationSettings.onWake.trim()}
+                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors shrink-0"
+                  >
+                    {t.testBtn}
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={automationSettings.restoreOnWake}
+                    onChange={e => setAutomationSettings(s => ({ ...s, restoreOnWake: e.target.checked }))}
+                    className="w-4 h-4 rounded accent-blue-500"
+                  />
+                  <span className="text-xs text-slate-300">{t.restoreOnWakeLabel}</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+              >
+                {lang === 'vi' ? 'Đóng' : 'Close'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAutomation}
+                disabled={isSavingSettings}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50"
+              >
+                {isSavingSettings ? (lang === 'vi' ? 'Đang lưu...' : 'Saving...') : t.saveBtn}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Chon Man Hinh Hien Thi (Tu dong nho cho lan khoi dong sau) */}
       {showDisplayModal && (
         <div
@@ -1432,6 +1671,140 @@ export default function App() {
                   </button>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cài Đặt Tự Động Hóa & Custom Actions */}
+      {showSettingsModal && (
+        <div
+          className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setShowSettingsModal(false)}
+        >
+          <div
+            className="bg-[#0f1422] border-2 border-blue-500/50 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white text-base w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-colors"
+            >
+              ✕
+            </button>
+
+            <div className="flex items-center gap-2.5 text-blue-400 font-bold text-sm uppercase tracking-wider">
+              <Settings className="w-5 h-5" />
+              <span>{t.automationModalTitle}</span>
+            </div>
+
+            <p className="text-slate-300 text-xs leading-relaxed">
+              {t.automationModalDesc}
+            </p>
+
+            {settingsNotice && (
+              <div className="p-3 rounded-xl bg-blue-950/60 border border-blue-500/50 text-blue-200 text-xs flex items-center gap-2 animate-in fade-in">
+                <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="font-medium">{settingsNotice}</span>
+              </div>
+            )}
+
+            <div className="space-y-4 pt-1 max-h-[60vh] overflow-y-auto pr-1">
+              {/* Cấu hình khi Âm lượng về 0 */}
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                    <VolumeX className="w-4 h-4 text-amber-400" />
+                    <span>{t.onZeroVolumeLabel}</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400">{t.onZeroVolumeHelp}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={automationSettings.onZeroVolume}
+                    onChange={e => setAutomationSettings(s => ({ ...s, onZeroVolume: e.target.value }))}
+                    placeholder={t.onZeroVolumePlaceholder}
+                    className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleTestCommand(automationSettings.onZeroVolume, 'zero_volume')}
+                    disabled={!automationSettings.onZeroVolume.trim()}
+                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors shrink-0"
+                  >
+                    {t.testBtn}
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={automationSettings.collapseOnZeroVolume}
+                    onChange={e => setAutomationSettings(s => ({ ...s, collapseOnZeroVolume: e.target.checked }))}
+                    className="w-4 h-4 rounded accent-blue-500"
+                  />
+                  <span className="text-xs text-slate-300">{t.collapseOnZeroVolumeLabel}</span>
+                </label>
+              </div>
+
+              {/* Cấu hình khi Đánh thức / Tăng âm lượng */}
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <Volume2 className="w-4 h-4 text-emerald-400" />
+                    <span>{t.onWakeLabel}</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400">{t.onWakeHelp}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={automationSettings.onWake}
+                    onChange={e => setAutomationSettings(s => ({ ...s, onWake: e.target.value }))}
+                    placeholder={t.onWakePlaceholder}
+                    className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleTestCommand(automationSettings.onWake, 'wake')}
+                    disabled={!automationSettings.onWake.trim()}
+                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors shrink-0"
+                  >
+                    {t.testBtn}
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={automationSettings.restoreOnWake}
+                    onChange={e => setAutomationSettings(s => ({ ...s, restoreOnWake: e.target.checked }))}
+                    className="w-4 h-4 rounded accent-blue-500"
+                  />
+                  <span className="text-xs text-slate-300">{t.restoreOnWakeLabel}</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+              >
+                {lang === 'vi' ? 'Đóng' : 'Close'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAutomation}
+                disabled={isSavingSettings}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50"
+              >
+                {isSavingSettings ? (lang === 'vi' ? 'Đang lưu...' : 'Saving...') : t.saveBtn}
+              </button>
             </div>
           </div>
         </div>

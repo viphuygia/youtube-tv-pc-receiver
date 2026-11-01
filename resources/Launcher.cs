@@ -136,7 +136,7 @@ namespace YouTubeTVReceiver
             }
 
             string tempProfile = Path.Combine(Path.GetTempPath(), "YouTubeTV_Profile");
-            string chromeArgs = "--user-data-dir=\"" + tempProfile + "\" " + displayFlags + " --autoplay-policy=no-user-gesture-required --no-first-run --start-fullscreen --kiosk \"http://localhost:8547?tv=1\"";
+            string chromeArgs = "--user-data-dir=\"" + tempProfile + "\" --profile-directory=Default --no-first-run --no-default-browser-check --disable-features=ProfilePicker --disable-session-crashed-bubble " + displayFlags + " --autoplay-policy=no-user-gesture-required --start-fullscreen --app=\"http://localhost:8547?tv=1\"";
 
             ProcessStartInfo psiBrowser = new ProcessStartInfo
             {
@@ -147,19 +147,7 @@ namespace YouTubeTVReceiver
 
             try
             {
-                Process browserProc = Process.Start(psiBrowser);
-                if (browserProc != null && nodeProc != null)
-                {
-                    browserProc.WaitForExit();
-                    try
-                    {
-                        if (!nodeProc.HasExited)
-                        {
-                            nodeProc.Kill();
-                        }
-                    }
-                    catch { }
-                }
+                Process.Start(psiBrowser);
             }
             catch (Exception ex)
             {

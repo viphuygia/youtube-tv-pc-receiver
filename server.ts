@@ -3,7 +3,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import YouTubeCastReceiver, { Player, Constants } from 'yt-cast-receiver';
@@ -122,9 +122,39 @@ async function broadcastStandbyState(standby: boolean) {
   });
 }
 
+const tvWindowManagerPath = path.join(__dirname, 'bin', 'TvWindowManager.exe');
+
+async function runTvWindowManager(action: 'minimize' | 'restore', display?: DisplayInfo): Promise<boolean> {
+  if (process.platform !== 'win32' || !fs.existsSync(tvWindowManagerPath)) return false;
+
+  return new Promise((resolve) => {
+    const args: string[] = [action];
+    if (action === 'restore' && display) {
+      args.push(String(display.x), String(display.y), String(display.width), String(display.height));
+    }
+    const proc = spawn(tvWindowManagerPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    proc.stdout?.on('data', d => { out += d.toString(); });
+    proc.on('close', (code) => {
+      const success = code === 0 && !out.includes(':0');
+      if (success) {
+        console.log(`[TvWindowManager Native] ${action} thành công (${out.trim()})`);
+      }
+      resolve(success);
+    });
+    proc.on('error', () => {
+      resolve(false);
+    });
+  });
+}
+
 // Thu nhỏ và ẩn cửa sổ Kiosk YouTube TV xuống Taskbar để không chiếm màn hình PC
 async function minimizeKioskWindow() {
   if (process.platform !== 'win32') return;
+
+  const ok = await runTvWindowManager('minimize');
+  if (ok) return;
+
   const ps = `
 Add-Type -TypeDefinition @"
 using System;
@@ -140,48 +170,98 @@ public class Win32TvMinimizer {
   public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
   [DllImport("user32.dll", CharSet = CharSet.Auto)]
   public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll", CharSet = CharSet.Auto)]
+  public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")]
+  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern IntPtr OpenWindowStation(string lpszWinSta, bool fInherit, uint dwDesiredAccess);
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetProcessWindowStation(IntPtr hWinSta);
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern IntPtr OpenDesktop(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetThreadDesktop(IntPtr hDesktop);
+  [DllImport("user32.dll")]
+  public static extern bool EnumDesktopWindows(IntPtr hDesktop, EnumWindowsProc lpfn, IntPtr lParam);
 
   public static List<IntPtr> FindWindows(int[] pids) {
     List<IntPtr> list = new List<IntPtr>();
-    HashSet<int> set = new HashSet<int>(pids);
+    IntPtr hWinSta = OpenWindowStation("WinSta0", false, 0x037F);
+    if (hWinSta != IntPtr.Zero) SetProcessWindowStation(hWinSta);
+    IntPtr hDesk = OpenDesktop("Default", 0, false, 0x01FF);
+    if (hDesk != IntPtr.Zero) SetThreadDesktop(hDesk);
+
+    HashSet<int> pidSet = new HashSet<int>(pids);
+
+    if (hDesk != IntPtr.Zero) {
+      EnumDesktopWindows(hDesk, (hWnd, lParam) => {
+        uint pid;
+        GetWindowThreadProcessId(hWnd, out pid);
+        StringBuilder sbCls = new StringBuilder(256);
+        GetClassName(hWnd, sbCls, 256);
+        string cls = sbCls.ToString();
+        StringBuilder sbTitle = new StringBuilder(256);
+        GetWindowText(hWnd, sbTitle, 256);
+        string title = sbTitle.ToString();
+
+        bool matchPid = pidSet.Contains((int)pid);
+        bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
+        bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+
+        if ((matchPid && matchCls) || (matchTitle && matchCls)) {
+          if (!list.Contains(hWnd)) list.Add(hWnd);
+        }
+        return true;
+      }, IntPtr.Zero);
+    }
+
     EnumWindows((hWnd, lParam) => {
       uint pid;
       GetWindowThreadProcessId(hWnd, out pid);
-      if (set.Contains((int)pid)) {
-        StringBuilder sb = new StringBuilder(256);
-        GetClassName(hWnd, sb, 256);
-        string cls = sb.ToString();
-        if (cls.StartsWith("Chrome_WidgetWin")) {
-          list.Add(hWnd);
-        }
+      StringBuilder sbCls = new StringBuilder(256);
+      GetClassName(hWnd, sbCls, 256);
+      string cls = sbCls.ToString();
+      StringBuilder sbTitle = new StringBuilder(256);
+      GetWindowText(hWnd, sbTitle, 256);
+      string title = sbTitle.ToString();
+
+      bool matchPid = pidSet.Contains((int)pid);
+      bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
+      bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+
+      if ((matchPid && matchCls) || (matchTitle && matchCls)) {
+        if (!list.Contains(hWnd)) list.Add(hWnd);
       }
       return true;
     }, IntPtr.Zero);
+
     return list;
+  }
+
+  public static void Minimize(IntPtr hWnd) {
+    if (hWnd == IntPtr.Zero) return;
+    // Bỏ cờ Topmost trước khi thu nhỏ để không che các ứng dụng khác
+    SetWindowPos(hWnd, new IntPtr(-2), 0, 0, 0, 0, 0x0003); // HWND_NOTOPMOST, SWP_NOSIZE | SWP_NOMOVE
+    ShowWindow(hWnd, 6); // 6 = SW_MINIMIZE
   }
 }
 "@
 
-$kioskProcs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' -and $_.CommandLine -like '*--kiosk*' })
-if ($kioskProcs.Count -gt 1) {
-  for ($i = 1; $i -lt $kioskProcs.Count; $i++) {
-    Stop-Process -Id $kioskProcs[$i].ProcessId -Force -ErrorAction SilentlyContinue
-  }
-}
-
-$allPids = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | Select-Object -ExpandProperty ProcessId)
+$allPids = @(Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -like '*YouTubeTV_Profile*' } | Select-Object -ExpandProperty ProcessId)
 if ($allPids.Count -gt 0) {
   $targetHwnds = [Win32TvMinimizer]::FindWindows([int[]]$allPids)
   foreach ($h in $targetHwnds) {
-    [Win32TvMinimizer]::ShowWindow($h, 6) | Out-Null # 6 = SW_MINIMIZE
+    [Win32TvMinimizer]::Minimize($h)
   }
   if ($targetHwnds.Count -eq 0) {
     foreach ($pidVal in $allPids) {
       $pr = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
       if ($pr -and $pr.MainWindowHandle -ne 0) {
-        [Win32TvMinimizer]::ShowWindow($pr.MainWindowHandle, 6) | Out-Null
+        [Win32TvMinimizer]::Minimize($pr.MainWindowHandle)
       }
     }
   }
@@ -190,10 +270,19 @@ if ($allPids.Count -gt 0) {
   await runPowerShellEncoded(ps);
 }
 
-// Khôi phục cửa sổ TV về toàn màn hình trên Display đã lưu
+// Khôi phục cửa sổ TV về toàn màn hình trên Display đã lưu và đưa lên trên cùng che mọi app
 async function restoreKioskWindow() {
   const target = await getTargetDisplay();
-  await moveKioskWindowToDisplay(target);
+  const running = await isKioskRunning();
+  if (!running) {
+    console.log('[Kiosk Manager] Cửa sổ TV Kiosk chưa mở hoặc đã bị đóng -> Tự động khởi chạy trên màn hình đích...');
+    launchKioskBrowser(target);
+    setTimeout(async () => {
+      await moveKioskWindowToDisplay(target);
+    }, 1500);
+  } else {
+    await moveKioskWindowToDisplay(target);
+  }
 }
 
 let autoStandbyTimer: NodeJS.Timeout | null = null;
@@ -215,6 +304,63 @@ function cancelAutoStandby() {
   }
 }
 
+// ==========================================
+// CUSTOM AUTOMATION ACTIONS & TRIGGER ENGINE
+// Cho phép người dùng cấu hình app / script tự động chạy khi âm lượng về 0 (Mute) hoặc khi đánh thức TV
+// ==========================================
+async function runCustomAutomation(trigger: 'zero_volume' | 'wake', customCmd?: string): Promise<{ success: boolean; command?: string; error?: string; reason?: string }> {
+  try {
+    let cmd = customCmd;
+    if (!cmd) {
+      if (trigger === 'zero_volume') {
+        cmd = await persistentStore.get('automation.onZeroVolume');
+      } else if (trigger === 'wake') {
+        cmd = await persistentStore.get('automation.onWake');
+      }
+    }
+    if (typeof cmd === 'string' && cmd.trim()) {
+      const trimmed = cmd.trim();
+      console.log(`[Automation Trigger] Kích hoạt tác vụ tự động hóa [${trigger}]: "${trimmed}"`);
+      if (process.platform === 'win32') {
+        // Khởi chạy độc lập bằng start "" để không làm treo tiến trình server Node.js
+        exec(`start "" ${trimmed}`, (error) => {
+          if (error) {
+            exec(trimmed, (err2) => {
+              if (err2) {
+                console.error(`[Automation Trigger Error] Lỗi khi chạy lệnh [${trigger}]:`, err2.message);
+              }
+            });
+          }
+        });
+      } else {
+        exec(trimmed);
+      }
+      return { success: true, command: trimmed };
+    }
+  } catch (err: any) {
+    console.error(`[Automation Trigger Exception]`, err);
+    return { success: false, error: err.message };
+  }
+  return { success: false, reason: 'No command configured' };
+}
+
+async function handleVolumeAutomation(level: number, muted: boolean, reason: string) {
+  if (muted || level === 0) {
+    console.log(`[Volume Automation] Âm lượng về 0 hoặc Mute -> Tự động hóa (${reason})`);
+    const collapseSetting = await persistentStore.get('automation.collapseOnZeroVolume');
+    const shouldCollapse = collapseSetting !== false; // Mặc định là true
+    if (shouldCollapse) {
+      await enterStandbyMode(`Âm lượng = 0 / Mute [${reason}]`);
+    } else {
+      // Dù không khép TV thì vẫn kích hoạt custom action
+      await runCustomAutomation('zero_volume');
+    }
+  } else if (isStandby && level > 0) {
+    console.log(`[Volume Automation] Tăng âm lượng > 0 -> Đánh thức TV (${reason})`);
+    await exitStandbyMode(`Tăng âm lượng lên ${level}% [${reason}]`);
+  }
+}
+
 async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
   cancelAutoStandby();
   console.log(`[YouTube Cast Standby] Kích hoạt Chế độ chờ (Standby) [Lý do: ${reason}]. Thu nhỏ ẩn cửa sổ PC.`);
@@ -225,6 +371,7 @@ async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
   broadcastStandbyState(true);
   broadcastControl({ action: 'standby' });
   await minimizeKioskWindow();
+  await runCustomAutomation('zero_volume');
 }
 
 async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu phát') {
@@ -233,7 +380,12 @@ async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu ph
   isStandby = false;
   broadcastStandbyState(false);
   broadcastControl({ action: 'wake' });
-  await restoreKioskWindow();
+  
+  const restoreSetting = await persistentStore.get('automation.restoreOnWake');
+  if (restoreSetting !== false) {
+    await restoreKioskWindow();
+  }
+  await runCustomAutomation('wake');
 }
 
 function broadcastVideo(videoData: typeof currentVideo) {
@@ -416,8 +568,17 @@ class WebCastPlayer extends Player {
     return true;
   }
 
+  private lastPauseTimestamp = 0;
   protected async doPause(): Promise<boolean> {
     console.log('[YouTube Cast from iPhone] Pause command');
+    const now = Date.now();
+    // Cử chỉ bấm Tạm dừng 2 lần liên tiếp trong vòng 3 giây -> Kích hoạt Chế độ ẩn TV ngay lập tức
+    if (now - this.lastPauseTimestamp < 3000) {
+      console.log('[YouTube Cast Cử chỉ] Bấm Tạm dừng (Pause) 2 lần liên tiếp -> Kích hoạt Chế độ ẩn TV');
+      enterStandbyMode('Bấm Tạm dừng (Pause) 2 lần liên tiếp từ iPhone');
+    }
+    this.lastPauseTimestamp = now;
+
     if (isVideoPlaying) {
       currentPositionSeconds += (Date.now() - positionLastUpdated) / 1000;
       isVideoPlaying = false;
@@ -470,6 +631,9 @@ class WebCastPlayer extends Player {
     console.log(`[YouTube Cast from iPhone] Set volume: ${volume.level}%, muted: ${volume.muted}`);
     currentVolumeLevel = Math.max(0, Math.min(100, Math.round(volume.level)));
     isVolumeMuted = Boolean(volume.muted);
+
+    await handleVolumeAutomation(currentVolumeLevel, isVolumeMuted, 'iPhone YouTube Cast');
+
     if (volume.muted) {
       broadcastControl({ action: 'mute' });
     } else {
@@ -522,11 +686,18 @@ let preferredDisplayDeviceName: string = '';
 function runPowerShellEncoded(psScript: string): Promise<string> {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve('');
-    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-    exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, { timeout: 6000 }, (err, stdout) => {
-      if (err) return resolve('');
-      resolve((stdout || '').trim());
+    const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-'], {
+      stdio: ['pipe', 'pipe', 'pipe']
     });
+
+    let stdout = '';
+    ps.stdout.on('data', (d) => { stdout += d.toString(); });
+    ps.on('close', () => { resolve(stdout.trim()); });
+    ps.on('error', () => { resolve(''); });
+
+    const scriptWithNewline = psScript.endsWith('\n') ? psScript : psScript + '\r\n';
+    ps.stdin.write(scriptWithNewline);
+    ps.stdin.end();
   });
 }
 
@@ -592,14 +763,13 @@ async function getTargetDisplay(): Promise<DisplayInfo> {
 function updateChromeProfilePlacement(display: DisplayInfo) {
   try {
     const tempDir = process.env.TEMP || os.tmpdir();
-    const defaultDir = path.join(tempDir, 'YouTubeTV_Profile', 'Default');
-    fs.mkdirSync(defaultDir, { recursive: true });
-    const prefFile = path.join(defaultDir, 'Preferences');
+    const prefFile = path.join(tempDir, 'YouTubeTV_Profile', 'Default', 'Preferences');
+    if (!fs.existsSync(prefFile)) return; // Tránh ghi đè file hỏng trước khi Chrome tự tạo profile chuẩn
     let prefs: any = {};
-    if (fs.existsSync(prefFile)) {
-      try {
-        prefs = JSON.parse(fs.readFileSync(prefFile, 'utf8'));
-      } catch {}
+    try {
+      prefs = JSON.parse(fs.readFileSync(prefFile, 'utf8'));
+    } catch {
+      return;
     }
     if (!prefs.browser) prefs.browser = {};
     prefs.browser.window_placement = {
@@ -617,10 +787,82 @@ function updateChromeProfilePlacement(display: DisplayInfo) {
   } catch {}
 }
 
+async function isKioskRunning(): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    return connectedClients.size > 0;
+  }
+  // 1. Kiểm tra nhanh qua TvWindowManager xem có cửa sổ TV thực tế trên màn hình hay không
+  if (fs.existsSync(tvWindowManagerPath)) {
+    const hasWindow = await new Promise<boolean>((resolve) => {
+      const proc = spawn(tvWindowManagerPath, ['status'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      let out = '';
+      proc.stdout?.on('data', d => { out += d.toString(); });
+      proc.on('close', () => {
+        if (out.includes('FOUND:') && !out.includes('FOUND:0')) {
+          return resolve(true);
+        }
+        resolve(false);
+      });
+      proc.on('error', () => resolve(false));
+    });
+    if (hasWindow) return true;
+  }
+
+  // 2. Kiểm tra tiến trình trình duyệt thực sự (chỉ chrome.exe hoặc msedge.exe)
+  const ps = `
+$p = @(Get-CimInstance Win32_Process | Where-Object { 
+  ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and 
+  $_.CommandLine -like '*YouTubeTV_Profile*' -and 
+  ($_.CommandLine -like '*--kiosk*' -or $_.CommandLine -like '*--app*') 
+})
+if ($p.Count -gt 0) { Write-Output 'true' } else { Write-Output 'false' }
+`;
+  const out = await runPowerShellEncoded(ps);
+  return out.trim() === 'true';
+}
+
+function launchKioskBrowser(display: DisplayInfo) {
+  if (process.platform !== 'win32') return;
+  updateChromeProfilePlacement(display);
+  const tempDir = process.env.TEMP || os.tmpdir();
+  const profileDir = path.join(tempDir, 'YouTubeTV_Profile');
+  const commonArgs = [
+    `--user-data-dir=${profileDir}`,
+    '--profile-directory=Default',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=ProfilePicker',
+    '--disable-session-crashed-bubble',
+    `--window-position=${display.x},${display.y}`,
+    `--window-size=${display.width},${display.height}`,
+    '--autoplay-policy=no-user-gesture-required',
+    '--start-fullscreen',
+    `--app=http://localhost:${PORT}?tv=1`
+  ];
+  const candidates = [
+    process.env['ProgramFiles'] ? path.join(process.env['ProgramFiles'], 'Google/Chrome/Application/chrome.exe') : '',
+    process.env['ProgramFiles(x86)'] ? path.join(process.env['ProgramFiles(x86)'], 'Google/Chrome/Application/chrome.exe') : '',
+    process.env['LOCALAPPDATA'] ? path.join(process.env['LOCALAPPDATA'], 'Google/Chrome/Application/chrome.exe') : '',
+    process.env['ProgramFiles(x86)'] ? path.join(process.env['ProgramFiles(x86)'], 'Microsoft/Edge/Application/msedge.exe') : '',
+    process.env['ProgramFiles'] ? path.join(process.env['ProgramFiles'], 'Microsoft/Edge/Application/msedge.exe') : '',
+  ].filter(p => p && fs.existsSync(p));
+
+  const browserBin = candidates[0] || 'chrome.exe';
+  try {
+    const child = spawn(browserBin, commonArgs, { detached: true, stdio: 'ignore' });
+    child.unref();
+  } catch (err) {
+    console.error('[Launch Kiosk Error]', err);
+  }
+}
+
 // Di chuyển và đưa ngay lập tức cửa sổ TV Kiosk lên trên cùng màn hình (Foreground / Topmost) bằng Win32 API
 async function moveKioskWindowToDisplay(display: DisplayInfo) {
   updateChromeProfilePlacement(display);
   if (process.platform !== 'win32') return;
+
+  const ok = await runTvWindowManager('restore', display);
+  if (ok) return;
 
   const ps = `
 Add-Type -TypeDefinition @"
@@ -632,14 +874,29 @@ using System.Text;
 public class Win32TvForegrounder {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern IntPtr OpenWindowStation(string lpszWinSta, bool fInherit, uint dwDesiredAccess);
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetProcessWindowStation(IntPtr hWinSta);
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern IntPtr OpenDesktop(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetThreadDesktop(IntPtr hDesktop);
+
   [DllImport("user32.dll")]
-  public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  public static extern bool EnumDesktopWindows(IntPtr hDesktop, EnumWindowsProc lpfn, IntPtr lParam);
 
   [DllImport("user32.dll")]
   public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
   [DllImport("user32.dll", CharSet = CharSet.Auto)]
   public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+  [DllImport("user32.dll", CharSet = CharSet.Auto)]
+  public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
   [DllImport("user32.dll")]
   public static extern bool IsWindowVisible(IntPtr hWnd);
@@ -670,41 +927,75 @@ public class Win32TvForegrounder {
 
   public static List<IntPtr> FindWindows(int[] pids) {
     List<IntPtr> list = new List<IntPtr>();
-    HashSet<int> set = new HashSet<int>(pids);
+    IntPtr hWinSta = OpenWindowStation("WinSta0", false, 0x037F);
+    if (hWinSta != IntPtr.Zero) SetProcessWindowStation(hWinSta);
+    IntPtr hDesk = OpenDesktop("Default", 0, false, 0x01FF);
+    if (hDesk != IntPtr.Zero) SetThreadDesktop(hDesk);
+
+    HashSet<int> pidSet = new HashSet<int>(pids);
+
+    if (hDesk != IntPtr.Zero) {
+      EnumDesktopWindows(hDesk, (hWnd, lParam) => {
+        uint pid;
+        GetWindowThreadProcessId(hWnd, out pid);
+        StringBuilder sbCls = new StringBuilder(256);
+        GetClassName(hWnd, sbCls, 256);
+        string cls = sbCls.ToString();
+        StringBuilder sbTitle = new StringBuilder(256);
+        GetWindowText(hWnd, sbTitle, 256);
+        string title = sbTitle.ToString();
+
+        bool matchPid = pidSet.Contains((int)pid);
+        bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
+        bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+
+        if ((matchPid && matchCls) || (matchTitle && matchCls)) {
+          if (!list.Contains(hWnd)) list.Add(hWnd);
+        }
+        return true;
+      }, IntPtr.Zero);
+    }
+
     EnumWindows((hWnd, lParam) => {
       uint pid;
       GetWindowThreadProcessId(hWnd, out pid);
-      if (set.Contains((int)pid)) {
-        StringBuilder sb = new StringBuilder(256);
-        GetClassName(hWnd, sb, 256);
-        string cls = sb.ToString();
-        if (cls.StartsWith("Chrome_WidgetWin")) {
-          list.Add(hWnd);
-        }
+      StringBuilder sbCls = new StringBuilder(256);
+      GetClassName(hWnd, sbCls, 256);
+      string cls = sbCls.ToString();
+      StringBuilder sbTitle = new StringBuilder(256);
+      GetWindowText(hWnd, sbTitle, 256);
+      string title = sbTitle.ToString();
+
+      bool matchPid = pidSet.Contains((int)pid);
+      bool matchTitle = title.Contains("YouTube TV") || title.Contains("YouTube-TV");
+      bool matchCls = cls.StartsWith("Chrome_WidgetWin");
+
+      if ((matchPid && matchCls) || (matchTitle && matchCls)) {
+        if (!list.Contains(hWnd)) list.Add(hWnd);
       }
       return true;
     }, IntPtr.Zero);
+
     return list;
   }
 
   public static void BringToFront(IntPtr hWnd, int x, int y, int w, int h) {
     if (hWnd == IntPtr.Zero) return;
 
-    // 1. Khôi phục trạng thái cửa sổ và phóng to
+    // 1. Khôi phục từ trạng thái thu nhỏ hoặc ẩn và phóng to toàn màn hình
     ShowWindow(hWnd, 9); // SW_RESTORE
     ShowWindow(hWnd, 3); // SW_MAXIMIZE
 
     // 2. Định vị tọa độ và kích thước trên màn hình đã chọn
-    // HWND_TOPMOST (-1), SWP_SHOWWINDOW (0x0040) -> kéo lên trên cùng danh sách Z-order
-    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
-    // HWND_NOTOPMOST (-2) -> duy trì vị trí trên cùng nhưng không khóa cứng vĩnh viễn
-    SetWindowPos(hWnd, new IntPtr(-2), x, y, w, h, 0x0040);
+    // HWND_TOPMOST (-1), SWP_SHOWWINDOW (0x0040) | SWP_FRAMECHANGED (0x0020) -> kéo lên trên cùng danh sách Z-order che mọi app
+    SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040 | 0x0020);
 
     // 3. Vượt qua cơ chế chặn chiếm tiêu điểm (Focus Stealing Prevention) của Windows bằng AttachThreadInput
     try {
       IntPtr fg = GetForegroundWindow();
       if (fg != IntPtr.Zero && fg != hWnd) {
-        uint fgThread = GetWindowThreadProcessId(fg, out _);
+        uint dummyPid;
+        uint fgThread = GetWindowThreadProcessId(fg, out dummyPid);
         uint curThread = GetCurrentThreadId();
         if (fgThread != 0 && fgThread != curThread) {
           AttachThreadInput(curThread, fgThread, true);
@@ -721,18 +1012,16 @@ public class Win32TvForegrounder {
     try {
       SwitchToThisWindow(hWnd, true);
     } catch {}
+
+    // 5. Củng cố lại cờ HWND_TOPMOST (-1) để đảm bảo cửa sổ luôn ở trên đỉnh và che mọi app
+    try {
+      SetWindowPos(hWnd, new IntPtr(-1), x, y, w, h, 0x0040);
+    } catch {}
   }
 }
 "@
 
-$kioskProcs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' -and $_.CommandLine -like '*--kiosk*' })
-if ($kioskProcs.Count -gt 1) {
-  for ($i = 1; $i -lt $kioskProcs.Count; $i++) {
-    Stop-Process -Id $kioskProcs[$i].ProcessId -Force -ErrorAction SilentlyContinue
-  }
-}
-
-$allPids = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | Select-Object -ExpandProperty ProcessId)
+$allPids = @(Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -like '*YouTubeTV_Profile*' } | Select-Object -ExpandProperty ProcessId)
 if ($allPids.Count -gt 0) {
   $targetHwnds = [Win32TvForegrounder]::FindWindows([int[]]$allPids)
   foreach ($h in $targetHwnds) {
@@ -995,10 +1284,13 @@ wss.on('connection', (ws: WebSocket) => {
         if (data.action === 'setVolume' && typeof data.value === 'number') {
           currentVolumeLevel = Math.max(0, Math.min(100, Math.round(data.value)));
           isVolumeMuted = false;
+          handleVolumeAutomation(currentVolumeLevel, false, 'Remote WebSocket');
         } else if (data.action === 'mute') {
           isVolumeMuted = true;
+          handleVolumeAutomation(currentVolumeLevel, true, 'Remote WebSocket');
         } else if (data.action === 'unMute') {
           isVolumeMuted = false;
+          handleVolumeAutomation(currentVolumeLevel, false, 'Remote WebSocket');
         } else if (data.action === 'seekRelative' && typeof data.value === 'number') {
           let target = Math.max(0, Math.floor(currentPositionSeconds + data.value));
           if (currentVideoDuration > 0 && target > currentVideoDuration) {
@@ -1236,15 +1528,7 @@ app.get('/api/display-flags', async (req, res) => {
 
 // Kiểm tra xem cửa sổ Kiosk Chrome/Edge đã đang mở hay chưa (tránh mở nhiều cửa sổ trùng lặp)
 app.get('/api/is-kiosk-running', async (req, res) => {
-  if (process.platform !== 'win32') {
-    return res.json({ running: connectedClients.size > 0 });
-  }
-  const ps = `
-$p = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' })
-if ($p.Count -gt 0) { Write-Output 'true' } else { Write-Output 'false' }
-`;
-  const out = await runPowerShellEncoded(ps);
-  const running = out.includes('true') || connectedClients.size > 0;
+  const running = await isKioskRunning();
   return res.json({ running });
 });
 
@@ -1275,6 +1559,55 @@ app.post('/api/displays/select', async (req, res) => {
     selectedDisplay: target,
     displays
   });
+});
+
+// Lấy cấu hình tự động hóa & custom actions
+app.get('/api/settings/automation', async (req, res) => {
+  const onZeroVolume = (await persistentStore.get('automation.onZeroVolume')) || '';
+  const onWake = (await persistentStore.get('automation.onWake')) || '';
+  const collapseOnZeroVolume = (await persistentStore.get('automation.collapseOnZeroVolume')) !== false;
+  const restoreOnWake = (await persistentStore.get('automation.restoreOnWake')) !== false;
+
+  return res.json({
+    onZeroVolume,
+    onWake,
+    collapseOnZeroVolume,
+    restoreOnWake
+  });
+});
+
+// Lưu cấu hình tự động hóa & custom actions
+app.post('/api/settings/automation', async (req, res) => {
+  const { onZeroVolume, onWake, collapseOnZeroVolume, restoreOnWake } = req.body || {};
+  if (typeof onZeroVolume === 'string') {
+    await persistentStore.set('automation.onZeroVolume', onZeroVolume.trim());
+  }
+  if (typeof onWake === 'string') {
+    await persistentStore.set('automation.onWake', onWake.trim());
+  }
+  if (typeof collapseOnZeroVolume === 'boolean') {
+    await persistentStore.set('automation.collapseOnZeroVolume', collapseOnZeroVolume);
+  }
+  if (typeof restoreOnWake === 'boolean') {
+    await persistentStore.set('automation.restoreOnWake', restoreOnWake);
+  }
+
+  console.log('[Automation Settings] Đã cập nhật cài đặt tự động hóa thành công:', {
+    onZeroVolume,
+    onWake,
+    collapseOnZeroVolume,
+    restoreOnWake
+  });
+
+  return res.json({ success: true, message: 'Đã lưu cấu hình tự động hóa thành công!' });
+});
+
+// Chạy thử (Test Run) lệnh tự động hóa ngay từ UI
+app.post('/api/settings/automation/test', async (req, res) => {
+  const { command, trigger } = req.body || {};
+  const targetTrigger = trigger || 'zero_volume';
+  const result = await runCustomAutomation(targetTrigger, command);
+  return res.json(result);
 });
 
 // Quit app endpoint (Đóng Kiosk TV & tắt máy chủ từ chế độ Fullscreen)

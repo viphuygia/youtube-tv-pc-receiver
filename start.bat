@@ -22,8 +22,12 @@ if not exist node_modules (
     call npm install --legacy-peer-deps
 )
 
-echo [1/3] Dang khoi dong may chu TV Receiver...
-start /b cmd /c "npx tsx server.ts"
+echo [1/3] Kiem tra may chu TV Receiver...
+curl -s -f http://localhost:8547/api/status >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Dang khoi dong may chu TV Receiver...
+    start /b cmd /c "npx tsx server.ts"
+)
 
 echo [2/3] Dang cho may chu khoi dong tren cong 8547...
 :WAIT_SERVER
@@ -57,7 +61,7 @@ if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set "EDGE_PATH=%
 set "POS_FLAGS="
 for /f "delims=" %%i in ('curl -s http://localhost:8547/api/display-flags') do set "POS_FLAGS=%%i"
 
-set FLAGS=--user-data-dir="%TEMP%\YouTubeTV_Profile" %POS_FLAGS% --autoplay-policy=no-user-gesture-required --no-first-run --start-fullscreen --kiosk "http://localhost:8547?tv=1"
+set FLAGS=--user-data-dir="%TEMP%\YouTubeTV_Profile" --profile-directory=Default --no-first-run --no-default-browser-check --disable-features=ProfilePicker --disable-session-crashed-bubble %POS_FLAGS% --autoplay-policy=no-user-gesture-required --start-fullscreen --app="http://localhost:8547?tv=1"
 
 if defined CHROME_PATH (
     start "" "%CHROME_PATH%" %FLAGS%

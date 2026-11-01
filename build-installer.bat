@@ -36,6 +36,7 @@ call C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:win
 
 echo [4/5] Dang chuan bi thu muc build-staging...
 if not exist build-staging mkdir build-staging
+if not exist build-staging\bin mkdir build-staging\bin
 if not exist build-staging\public mkdir build-staging\public
 if not exist build-staging\resources mkdir build-staging\resources
 
@@ -43,6 +44,8 @@ xcopy /E /I /Y dist build-staging\dist >nul
 copy /Y public\remote.html build-staging\public\remote.html >nul
 copy /Y resources\YouTubeTV.exe build-staging\YouTubeTV.exe >nul
 copy /Y resources\app.ico build-staging\resources\app.ico >nul
+copy /Y bin\TvWindowManager.exe build-staging\bin\TvWindowManager.exe >nul
+copy /Y bin\TvWindowManager.cs build-staging\bin\TvWindowManager.cs >nul
 
 where node >nul 2>nul
 if %errorlevel% equ 0 (
@@ -57,7 +60,7 @@ if %errorlevel% equ 0 (
     echo ========================================================
     echo   DONG GOI THANH CONG
     echo   File cai dat nam tai:
-    echo   dist-installer\YouTube-TV-Receiver-Setup-v1.1.1.exe
+    echo   dist-installer\YouTube-TV-Receiver-Setup-v1.2.0.exe
     echo ========================================================
 ) else (
     echo [LOI] Bien dich bo cai dat that bai

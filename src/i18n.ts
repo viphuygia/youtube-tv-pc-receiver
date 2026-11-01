@@ -68,7 +68,23 @@ export const translations = {
     standbyEnterBtn: "Ẩn vào Chế độ chờ",
     standbyActiveBadge: "TV Đang ở Chế độ chờ",
     standbyReadySub: "Video đã dừng hoàn toàn · Không tốn mạng · Bấm Play/Pause 5 lần trong 5s trên điện thoại để ẩn TV",
-    footerText: "YouTube Cast Receiver Lite cho máy tính Windows · Hỗ trợ DIAL & SSDP Multicast trên cùng mạng Wi-Fi"
+    footerText: "YouTube Cast Receiver Lite cho máy tính Windows · Hỗ trợ DIAL & SSDP Multicast trên cùng mạng Wi-Fi",
+    settingsBtn: "Cài đặt & Tự động hóa",
+    automationModalTitle: "Cài Đặt Hành Động Tùy Chỉnh & Tự Động Hóa",
+    automationModalDesc: "Cấu hình lệnh hoặc ứng dụng tự động mở khi bạn điều khiển từ iPhone (ví dụ: chuyển âm lượng về 0 hoặc Tắt tiếng để mở app công việc, tự động khép TV xuống).",
+    onZeroVolumeLabel: "Khi chỉnh Âm lượng về 0% hoặc Bấm Mute (Ẩn TV):",
+    onZeroVolumePlaceholder: "Nhập đường dẫn file (.exe, .bat) hoặc lệnh (ví dụ: notepad.exe, calc.exe, code, wt.exe)",
+    onZeroVolumeHelp: "Khi bạn chỉnh âm lượng về 0 hoặc bấm Tắt tiếng từ iPhone, hệ thống sẽ tự động kích hoạt ứng dụng / lệnh này.",
+    onWakeLabel: "Khi Đánh thức / Tăng âm lượng / Phát video mới:",
+    onWakePlaceholder: "Nhập lệnh thực thi khi bật lại TV (Tùy chọn)",
+    onWakeHelp: "Chạy khi có video mới cast tới hoặc khi bạn kéo âm lượng tăng trở lại từ iPhone.",
+    collapseOnZeroVolumeLabel: "Tự động khép TV xuống Taskbar khi âm lượng về 0%",
+    restoreOnWakeLabel: "Tự động đưa TV lên đỉnh màn hình che mọi app khi có kết nối lại",
+    testBtn: "Chạy thử",
+    saveBtn: "Lưu cài đặt",
+    savedSuccess: "Đã lưu cài đặt tự động hóa thành công!",
+    testSuccess: "Đã chạy thử thành công!",
+    testError: "Lỗi chạy thử:"
   },
   en: {
     topNoticeStrong: "iPhone Connection Tip:",
@@ -137,6 +153,22 @@ export const translations = {
     standbyEnterBtn: "Hide to Standby",
     standbyActiveBadge: "TV is in Standby Mode",
     standbyReadySub: "Video stopped · Zero bandwidth · Press Play/Pause 5x in 5s on phone to hide TV",
-    footerText: "YouTube Cast Receiver Lite for Windows PC · Supports DIAL & SSDP Multicast over local Wi-Fi"
+    footerText: "YouTube Cast Receiver Lite for Windows PC · Supports DIAL & SSDP Multicast over local Wi-Fi",
+    settingsBtn: "Settings & Automation",
+    automationModalTitle: "Custom Action & Automation Settings",
+    automationModalDesc: "Configure commands or apps to trigger automatically when controlling from iPhone (e.g. lowering volume to 0 or Mute to open a work app, collapsing TV).",
+    onZeroVolumeLabel: "When Volume is 0% or Mute is pressed (TV Hide):",
+    onZeroVolumePlaceholder: "Enter executable path (.exe, .bat) or command (e.g. notepad.exe, calc.exe, code, wt.exe)",
+    onZeroVolumeHelp: "When you drag volume to 0 or tap Mute on iPhone, this command or application will launch automatically.",
+    onWakeLabel: "When Waking up / Increasing Volume / New Cast:",
+    onWakePlaceholder: "Enter command to execute on wake (Optional)",
+    onWakeHelp: "Runs when a new video is cast or when you raise the volume back up from iPhone.",
+    collapseOnZeroVolumeLabel: "Auto-collapse TV window to Taskbar when volume is 0%",
+    restoreOnWakeLabel: "Auto-restore TV window to Topmost covering all apps when reconnected",
+    testBtn: "Test Run",
+    saveBtn: "Save Settings",
+    savedSuccess: "Automation settings saved successfully!",
+    testSuccess: "Test triggered successfully!",
+    testError: "Test error:"
   }
 };
