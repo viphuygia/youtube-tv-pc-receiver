@@ -104,7 +104,7 @@ let lastExternalNotifyTime = 0;
 // Resolver chờ thời lượng thực từ trình phát khi bắt đầu video mới
 let pendingDurationResolver: ((dur: number) => void) | null = null;
 
-function broadcastStandbyState(standby: boolean) {
+async function broadcastStandbyState(standby: boolean) {
   isStandby = standby;
   if (standby) {
     isVideoPlaying = false;
@@ -122,21 +122,55 @@ function broadcastStandbyState(standby: boolean) {
   });
 }
 
-function enterStandbyMode(reason: string = 'Ngắt kết nối') {
-  console.log(`[YouTube Cast Standby Trigger] Kích hoạt Chế độ chờ (Standby) [Lý do: ${reason}]. Dừng phát video.`);
+// Thu nhỏ và ẩn cửa sổ Kiosk YouTube TV xuống Taskbar để không chiếm màn hình PC
+async function minimizeKioskWindow() {
+  if (process.platform !== 'win32') return;
+  const ps = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32TvMinimizer {
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+
+$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' }
+foreach ($p in $procs) {
+  try {
+    $procObj = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+    if ($procObj -and $procObj.MainWindowHandle -ne 0) {
+      [Win32TvMinimizer]::ShowWindow($procObj.MainWindowHandle, 6) | Out-Null # 6 = SW_MINIMIZE
+    }
+  } catch {}
+}
+`;
+  await runPowerShellEncoded(ps);
+}
+
+// Khôi phục cửa sổ TV về toàn màn hình trên Display đã lưu
+async function restoreKioskWindow() {
+  const target = await getTargetDisplay();
+  await moveKioskWindowToDisplay(target);
+}
+
+async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
+  console.log(`[YouTube Cast Standby] Kích hoạt Chế độ chờ (Standby) [Lý do: ${reason}]. Thu nhỏ ẩn cửa sổ PC.`);
   isStandby = true;
   isVideoPlaying = false;
   currentPositionSeconds = 0;
   ytPlayer.stop().catch(() => {});
   broadcastStandbyState(true);
   broadcastControl({ action: 'standby' });
+  await minimizeKioskWindow();
 }
 
-function exitStandbyMode(reason: string = 'Bắt đầu phát') {
-  console.log(`[YouTube Cast Standby Trigger] Thoát Chế độ chờ -> Bắt đầu phát video [Lý do: ${reason}].`);
+async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu phát') {
+  console.log(`[YouTube Cast Standby] Thoát Chế độ chờ -> Hiện ứng dụng [Lý do: ${reason}].`);
   isStandby = false;
   broadcastStandbyState(false);
   broadcastControl({ action: 'wake' });
+  await restoreKioskWindow();
 }
 
 function broadcastVideo(videoData: typeof currentVideo) {
@@ -267,6 +301,12 @@ class WebCastPlayer extends Player {
   protected async doPlay(video: any, position: number): Promise<boolean> {
     const startSec = Math.max(0, Math.floor(Number(position) || 0));
     console.log(`[YouTube Cast Received from iPhone] Video ID: ${video.id}, Position: ${startSec}s`);
+
+    // Tự động thoát Chế độ chờ và hiện lại cửa sổ TV full screen khi có video mới
+    if (isStandby) {
+      exitStandbyMode('Phát video Cast từ YouTube App');
+    }
+
     currentPositionSeconds = startSec;
     positionLastUpdated = Date.now();
     lastSeekTimestamp = Date.now();
@@ -511,6 +551,8 @@ public class Win32TvMover {
   public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 "@
 
@@ -520,10 +562,11 @@ foreach ($p in $procs) {
     $procObj = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
     if ($procObj -and $procObj.MainWindowHandle -ne 0) {
       $h = $procObj.MainWindowHandle
-      [Win32TvMover]::ShowWindow($h, 9) | Out-Null
+      [Win32TvMover]::ShowWindow($h, 9) | Out-Null # 9 = SW_RESTORE
       [Win32TvMover]::SetWindowPos($h, [IntPtr]::Zero, ${display.x}, ${display.y}, ${display.width}, ${display.height}, 0x0040) | Out-Null
-      [Win32TvMover]::ShowWindow($h, 3) | Out-Null
+      [Win32TvMover]::ShowWindow($h, 3) | Out-Null # 3 = SW_MAXIMIZE
       [Win32TvMover]::SetWindowPos($h, [IntPtr]::Zero, ${display.x}, ${display.y}, ${display.width}, ${display.height}, 0x0040) | Out-Null
+      [Win32TvMover]::SetForegroundWindow($h) | Out-Null
     }
   } catch {}
 }
@@ -554,6 +597,9 @@ ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
 
   if (message?.name === 'setPlaylist') {
     if (resolvedVideoId) {
+      if (isStandby) {
+        exitStandbyMode('Nhận video mới từ setPlaylist');
+      }
       p.videoId = resolvedVideoId;
       if (!p.videoIds) {
         p.videoIds = resolvedVideoId;
@@ -576,11 +622,28 @@ ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
       p.currentIndex = String(ytPlayer.queue.current.context?.index ?? 0);
     }
 
-    // Đảm bảo YouTubeApp luôn nhận diện có sự thay đổi để gọi player.play() cho video được chọn
-    if (ytPlayer.queue.current?.context && resolvedVideoId) {
-      ytPlayer.queue.current.context.index = -999;
+    const res = await origUpdateByMessage(message, client);
+
+    // Đảm bảo video mới luôn được phát trên TV ngay cả khi YouTubeApp nội bộ không tự gọi play()
+    if (resolvedVideoId && currentVideo.videoId !== resolvedVideoId) {
+      console.log(`[Queue Fallback] Chủ động kích hoạt phát video mới: ${resolvedVideoId}`);
+      const updatedIds = ytPlayer.queue.videoIds;
+      const idx = updatedIds.indexOf(resolvedVideoId);
+      const newTarget = {
+        id: resolvedVideoId,
+        client,
+        context: {
+          playlistId: p.listId || ytPlayer.queue.id || `PPSV_${resolvedVideoId}`,
+          index: idx >= 0 ? idx : (Number(p.currentIndex) || 0)
+        }
+      };
+      await ytPlayer.play(newTarget, parseInt(p.currentTime, 10) || 0);
     }
+    return res;
   } else if (message?.name === 'updatePlaylist') {
+    if (isStandby && resolvedVideoId) {
+      exitStandbyMode('Nhận video mới từ updatePlaylist');
+    }
     if (!p.listId && (p.videoIds || resolvedVideoId || ytPlayer.queue.id)) {
       p.listId = ytPlayer.queue.id || `PPSV_${resolvedVideoId || currentVideo.videoId}`;
     }
@@ -590,6 +653,7 @@ ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
 
     // Nếu người dùng chọn phát một video mới trong danh sách chờ (VIDEO_SELECTED)
     if (eventType === 'VIDEO_SELECTED' && eventVideoId) {
+      exitStandbyMode('Nhận VIDEO_SELECTED từ updatePlaylist');
       await origUpdateByMessage(message, client);
       const updatedIds = ytPlayer.queue.videoIds;
       const idx = updatedIds.indexOf(eventVideoId);
@@ -640,12 +704,9 @@ ytReceiver.on('senderConnect', (sender: any) => {
 
 ytReceiver.on('senderDisconnect', (sender: any, implicit?: boolean) => {
   const senderName = sender?.name || 'Thiết bị';
-  console.log(`[YouTube Cast] Disconnected from sender: ${senderName} (implicit: ${implicit})`);
-  // Kiểm tra số thiết bị còn kết nối
-  const remainingSenders = ytReceiver.getConnectedSenders ? ytReceiver.getConnectedSenders() : [];
-  if (!remainingSenders || remainingSenders.length === 0) {
-    enterStandbyMode(`Sender "${senderName}" đã ngắt kết nối`);
-  }
+  console.log(`[YouTube Cast] Sender disconnected: ${senderName} (implicit: ${implicit})`);
+  // KHÔNG tự động chuyển sang standby khi sender ngắt kết nối
+  // để tránh việc chuyển video hoặc đổi tab trên điện thoại làm ngắt quãng trải nghiệm của người dùng
 });
 
 // WebSocket connection for the TV screen and iPhone Remote
@@ -665,7 +726,7 @@ wss.on('connection', (ws: WebSocket) => {
     moveKioskWindowToDisplay(target).catch(() => {});
   }).catch(() => {});
 
-  ws.on('message', (raw: Buffer | string) => {
+  ws.on('message', async (raw: Buffer | string) => {
     try {
       const data = JSON.parse(raw.toString());
 
@@ -733,12 +794,12 @@ wss.on('connection', (ws: WebSocket) => {
       }
 
       if (data.type === 'standby' || (data.type === 'control' && data.action === 'standby')) {
-        enterStandbyMode('Yêu cầu từ Remote/Client');
+        await enterStandbyMode('Yêu cầu từ Remote/Client');
         return;
       }
 
       if (data.type === 'wake' || (data.type === 'control' && data.action === 'wake')) {
-        exitStandbyMode('Yêu cầu từ Remote/Client');
+        await exitStandbyMode('Yêu cầu từ Remote/Client');
         return;
       }
 
@@ -848,6 +909,10 @@ app.post('/api/cast', async (req, res) => {
   }
 
   if (targetId) {
+    if (isStandby) {
+      await exitStandbyMode('Cast từ Web / iPhone');
+    }
+
     let resolvedTitle = body?.title;
     if (!resolvedTitle || resolvedTitle.startsWith('Video') || resolvedTitle.startsWith('YouTube Video')) {
       try {
@@ -896,10 +961,10 @@ app.get('/api/status', (req, res) => {
 });
 
 // Chuyển đổi thủ công Chế độ chờ (Standby) từ API / Web / Remote
-app.post('/api/standby', (req, res) => {
+app.post('/api/standby', async (req, res) => {
   const { standby } = req.body || {};
   if (standby === false) {
-    exitStandbyMode('Yêu cầu bật từ API / Web');
+    await exitStandbyMode('Yêu cầu bật từ API / Web');
     if (!currentVideo.videoId) {
       currentVideo.videoId = 'LXb3EKWsInQ';
       currentVideo.title = 'Thiên Nhiên 4K Ultra HD';
@@ -907,7 +972,7 @@ app.post('/api/standby', (req, res) => {
       broadcastVideo(currentVideo);
     }
   } else {
-    enterStandbyMode('Yêu cầu Chế độ chờ từ API / Web');
+    await enterStandbyMode('Yêu cầu Chế độ chờ từ API / Web');
   }
   return res.json({ success: true, isStandby });
 });

@@ -41,14 +41,26 @@
         </div>
       </div>
     </div>
-    <button onclick="toggleFullscreen()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-xs font-medium text-slate-300 flex items-center gap-1 transition-all">
-      <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
-      <span>Toàn màn hình</span>
-    </button>
+    <div class="flex items-center gap-2">
+      <!-- Nút Chế độ chờ / Bật TV trên Header -->
+      <button id="header-standby-btn" onclick="toggleStandby()" class="px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md bg-slate-900 border-amber-500/40 text-amber-300 hover:bg-slate-800 active:scale-95">
+        <span id="header-standby-icon">🌙</span>
+        <span id="header-standby-text">Ẩn TV</span>
+      </button>
+
+      <button onclick="toggleFullscreen()" class="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-slate-300 transition-all" title="Toàn màn hình PC">
+        <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+      </button>
+    </div>
   </header>
 
   <!-- Main Content -->
   <main class="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
+
+    <!-- Standby / Display Status Card (Trigger chính thức từ iPhone) -->
+    <div id="standby-status-card" class="rounded-2xl border transition-all shadow-lg p-3.5">
+      <!-- Sẽ được điền tự động bởi updateStandbyUi() -->
+    </div>
 
     <!-- Currently Playing Card -->
     <div class="bg-gradient-to-br from-[#121524] to-[#0a0c14] border border-slate-800 rounded-2xl p-3.5 shadow-xl space-y-3">
@@ -228,18 +240,77 @@
 
     function updateStandbyUi(standby) {
       isStandby = standby;
-      const btn = document.getElementById('btn-standby');
-      const text = document.getElementById('standby-text');
-      if (!btn || !text) return;
+      const headerBtn = document.getElementById('header-standby-btn');
+      const headerText = document.getElementById('header-standby-text');
+      const headerIcon = document.getElementById('header-standby-icon');
+      const bottomBtn = document.getElementById('btn-standby');
+      const bottomText = document.getElementById('standby-text');
+      const statusCard = document.getElementById('standby-status-card');
+
       if (standby) {
-        text.textContent = '▶️ Bật TV / Đánh thức';
-        btn.className = 'py-2.5 px-3 rounded-xl bg-emerald-950/70 border border-emerald-600/60 active:scale-95 hover:bg-emerald-900 text-xs font-semibold text-emerald-300 flex items-center justify-center gap-1.5 transition-all col-span-2 shadow-md';
-        document.getElementById('video-title').textContent = 'TV đang ở Chế độ chờ (Standby)';
-        document.getElementById('video-id-display').textContent = 'Video đã dừng · Sẵn sàng nhận Cast';
-        document.getElementById('playing-source').textContent = 'Standby';
+        if (headerBtn) {
+          headerBtn.className = 'px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md bg-emerald-950 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900 active:scale-95';
+        }
+        if (headerText) headerText.textContent = 'Bật TV';
+        if (headerIcon) headerIcon.textContent = '▶️';
+
+        if (bottomBtn) {
+          bottomBtn.className = 'py-2.5 px-3 rounded-xl bg-emerald-950/80 border border-emerald-600/70 active:scale-95 hover:bg-emerald-900 text-xs font-semibold text-emerald-300 flex items-center justify-center gap-1.5 transition-all col-span-2 shadow-md';
+        }
+        if (bottomText) bottomText.textContent = '▶️ Bật TV (Hiện toàn màn hình)';
+
+        if (statusCard) {
+          statusCard.className = 'rounded-2xl border transition-all shadow-xl p-4 bg-gradient-to-r from-amber-950/40 via-purple-950/30 to-slate-900 border-amber-500/40 text-center space-y-3';
+          statusCard.innerHTML = `
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold">
+              <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span>TV ĐANG Ở CHẾ ĐỘ CHỜ (CỬA SỔ PC ĐÃ ẨN)</span>
+            </div>
+            <p class="text-[11px] text-slate-300 leading-relaxed">
+              Cửa sổ TV đã được thu nhỏ xuống Taskbar, không chiếm màn hình máy tính của bạn. Chọn video hoặc bấm nút dưới để bật lại.
+            </p>
+            <button onclick="toggleStandby()" class="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-98 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <span>BẬT LẠI TV (HIỆN TOÀN MÀN HÌNH PC)</span>
+            </button>
+          `;
+        }
+
+        const vTitle = document.getElementById('video-title');
+        const vId = document.getElementById('video-id-display');
+        const pSource = document.getElementById('playing-source');
+        if (vTitle) vTitle.textContent = 'TV đang ở Chế độ chờ (Đã ẩn cửa sổ)';
+        if (vId) vId.textContent = 'Video đã dừng · Sẵn sàng nhận Cast';
+        if (pSource) pSource.textContent = 'Đã ẩn (Standby)';
       } else {
-        text.textContent = '🌙 Chế độ chờ (Standby)';
-        btn.className = 'py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 active:scale-95 hover:bg-slate-800 text-xs font-semibold text-amber-300 flex items-center justify-center gap-1.5 transition-all col-span-2';
+        if (headerBtn) {
+          headerBtn.className = 'px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md bg-slate-900 border-amber-500/40 text-amber-300 hover:bg-slate-800 active:scale-95';
+        }
+        if (headerText) headerText.textContent = 'Ẩn TV';
+        if (headerIcon) headerIcon.textContent = '🌙';
+
+        if (bottomBtn) {
+          bottomBtn.className = 'py-2.5 px-3 rounded-xl bg-slate-900 border border-amber-500/30 active:scale-95 hover:bg-slate-800 text-xs font-semibold text-amber-300 flex items-center justify-center gap-1.5 transition-all col-span-2';
+        }
+        if (bottomText) bottomText.textContent = '🌙 Ẩn TV (Chế độ chờ - Giải phóng PC)';
+
+        if (statusCard) {
+          statusCard.className = 'rounded-2xl border transition-all shadow-md p-3.5 bg-slate-900/90 border-slate-800';
+          statusCard.innerHTML = `
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                  <span>TV Đang Chiếu Màn Hình</span>
+                </div>
+                <div class="text-[10px] text-slate-400 truncate mt-0.5">Bấm để ẩn cửa sổ TV giải phóng màn hình PC</div>
+              </div>
+              <button onclick="toggleStandby()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-amber-500/40 text-amber-300 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 shadow-sm">
+                <span>🌙 Ẩn TV</span>
+              </button>
+            </div>
+          `;
+        }
       }
     }
 
@@ -449,7 +520,8 @@
       fetch('/api/status')
         .then(r => r.json())
         .then(d => {
-          if (d.currentVideo) updatePlayingInfo(d.currentVideo);
+          if (d.isStandby !== undefined) updateStandbyUi(Boolean(d.isStandby));
+          if (d.currentVideo && !d.isStandby) updatePlayingInfo(d.currentVideo);
           if (d.pairingCode) document.getElementById('tv-code-display').textContent = d.pairingCode;
         })
         .catch(() => {});
