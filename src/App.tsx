@@ -120,6 +120,7 @@ export default function App() {
   const preferredQualityRef = useRef<string>(preferredQuality);
   const subtitlesEnabledRef = useRef<boolean>(subtitlesEnabled);
   const subtitlesLangRef = useRef<string>(subtitlesLang);
+  const appliedVideoSettingsForIdRef = useRef<string>('');
 
   useEffect(() => {
     preferredQualityRef.current = preferredQuality;
@@ -262,32 +263,31 @@ export default function App() {
               }
             }
 
-            // Bỏ qua cập nhật currentTime cũ trong 2.2s đầu sau khi người dùng bấm tua (giúp tua ngược video Công chiếu / Trực tiếp mượt mà)
+            // Bỏ qua cập nhật currentTime cũ trong 1.2s đầu sau khi người dùng bấm tua để tránh giật ngược
             if (typeof info.currentTime === 'number' && !isNaN(info.currentTime)) {
-              if (Date.now() - lastClientSeekRef.current > 2200) {
+              if (Date.now() - lastClientSeekRef.current > 1200) {
                 playerTimeRef.current = info.currentTime;
               }
             }
 
             const rawDur = Math.max(
-              typeof info.duration === 'number' && !isNaN(info.duration) ? info.duration : 0,
+              typeof info.duration === 'number' && !isNaN(info.duration) && info.duration > 0 ? info.duration : 0,
               playerSeekableEndRef.current,
-              typeof info.progressState?.duration === 'number' ? info.progressState.duration : 0,
-              typeof info.currentTime === 'number' && !isNaN(info.currentTime) ? Math.ceil(info.currentTime) : 0
+              typeof info.progressState?.duration === 'number' && info.progressState.duration > 0 ? info.progressState.duration : 0
             );
             if (rawDur > 0) {
-              const nextDur = Math.max(playerDurationRef.current, rawDur);
-              if (playerDurationRef.current === 0 || Math.abs(nextDur - playerDurationRef.current) >= 5) {
+              if (playerDurationRef.current === 0 || Math.abs(rawDur - playerDurationRef.current) >= 1) {
                 forceImmediateSync = true;
               }
-              playerDurationRef.current = nextDur;
+              playerDurationRef.current = playerSeekableStartRef.current > 0 ? Math.max(playerDurationRef.current, rawDur) : rawDur;
             }
 
             if (typeof info.playerState === 'number') {
               if (info.playerState !== playerStateRef.current) {
                 forceImmediateSync = true;
-                // Khi video vừa chuyển sang trạng thái Đang phát (1), khóa lại độ phân giải và tắt/bật phụ đề theo đúng ý người dùng
-                if (info.playerState === 1) {
+                // Chỉ áp dụng khóa độ phân giải và phụ đề 1 lần duy nhất khi video mới bắt đầu phát (tránh gọi lại sau mỗi lần tua 3 -> 1 gây khựng video)
+                if (info.playerState === 1 && currentVideoIdRef.current && appliedVideoSettingsForIdRef.current !== currentVideoIdRef.current) {
+                  appliedVideoSettingsForIdRef.current = currentVideoIdRef.current;
                   applyQualityToIframe(preferredQualityRef.current);
                   applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
                 } else if (info.playerState === 0 && !isStandbyRef.current && currentVideoIdRef.current) {
@@ -301,7 +301,8 @@ export default function App() {
           } else if (data.event === 'onStateChange' && typeof info === 'number') {
             if (info !== playerStateRef.current) {
               forceImmediateSync = true;
-              if (info === 1) {
+              if (info === 1 && currentVideoIdRef.current && appliedVideoSettingsForIdRef.current !== currentVideoIdRef.current) {
+                appliedVideoSettingsForIdRef.current = currentVideoIdRef.current;
                 applyQualityToIframe(preferredQualityRef.current);
                 applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
               } else if (info === 0 && !isStandbyRef.current && currentVideoIdRef.current) {
@@ -648,6 +649,7 @@ export default function App() {
                 playerSeekableStartRef.current = 0;
                 playerSeekableEndRef.current = 0;
                 playerStateRef.current = -1;
+                appliedVideoSettingsForIdRef.current = '';
                 activateYouTubeBridge();
                 if (startSec > 0) {
                   sendIframeCommand('loadVideoById', [incomingVid, startSec]);
@@ -881,6 +883,26 @@ export default function App() {
         subtitlesEnabledRef.current = nextEnabled;
         applySubtitlesToIframe(nextEnabled, subtitlesLangRef.current);
       }
+      if (e.key === 'ArrowRight' && !isStandbyRef.current) {
+        e.preventDefault();
+        const target = Math.max(0, playerTimeRef.current + 10);
+        lastClientSeekRef.current = Date.now();
+        playerTimeRef.current = target;
+        sendIframeCommand('seekTo', [target, true]);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'control', action: 'seekTo', value: target }));
+        }
+      }
+      if (e.key === 'ArrowLeft' && !isStandbyRef.current) {
+        e.preventDefault();
+        const target = Math.max(0, playerTimeRef.current - 10);
+        lastClientSeekRef.current = Date.now();
+        playerTimeRef.current = target;
+        sendIframeCommand('seekTo', [target, true]);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'control', action: 'seekTo', value: target }));
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -896,6 +918,7 @@ export default function App() {
     playerSeekableStartRef.current = 0;
     playerSeekableEndRef.current = 0;
     playerStateRef.current = -1;
+    appliedVideoSettingsForIdRef.current = '';
 
     setVideo({
       videoId,

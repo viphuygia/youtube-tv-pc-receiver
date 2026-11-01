@@ -104,6 +104,7 @@ let lastSeekTimestamp = 0; // Chống nhảy ngược về live-head / 0s khi đ
 let lastVideoLoadTimestamp = 0; // Mốc thời gian bắt đầu nạp video mới để chống sự kiện ended ảo lúc chuyển bài
 let lastExternalNotifyTime = 0;
 let lastDurationNotifyTime = 0;
+let lastNotifiedDuration = 0;
 let preferredQuality = 'hd1080'; // Độ phân giải ưu tiên mặc định (hd2160, hd1440, hd1080, hd720, large, medium, auto)
 let subtitlesEnabled = false; // Mặc định tắt phụ đề
 let subtitlesLang = 'vi';
@@ -540,7 +541,7 @@ class WebCastPlayer extends Player {
 
     currentPositionSeconds = startSec;
     positionLastUpdated = Date.now();
-    lastSeekTimestamp = Date.now();
+    lastSeekTimestamp = 0;
     isVideoPlaying = true;
 
     // Đặt lại thời lượng khi đổi sang video khác
@@ -549,6 +550,7 @@ class WebCastPlayer extends Player {
       currentSeekableStartTime = 0;
       currentSeekableEndTime = 0;
       lastDurationNotifyTime = 0;
+      lastNotifiedDuration = 0;
     }
 
     const initialTitle = video.title || `YouTube Video (${video.id})`;
@@ -647,7 +649,7 @@ class WebCastPlayer extends Player {
 
   protected async doGetPosition(): Promise<number> {
     let current = currentPositionSeconds;
-    if (isVideoPlaying && Date.now() - lastSeekTimestamp > 2200) {
+    if (isVideoPlaying && Date.now() - lastSeekTimestamp > 1200) {
       current += (Date.now() - positionLastUpdated) / 1000;
     }
     const maxDur = Math.max(currentVideoDuration, currentSeekableEndTime);
@@ -658,13 +660,13 @@ class WebCastPlayer extends Player {
   }
 
   protected async doGetDuration(): Promise<number> {
-    // Trả về chính xác thời lượng thực (hoặc live edge đối với video trực tiếp/công chiếu) để thanh tua trên iPhone kéo ngược về được
-    const effDur = Math.max(currentVideoDuration, currentSeekableEndTime, Math.ceil(currentPositionSeconds));
+    // Trả về chính xác thời lượng thực (hoặc live edge đối với video trực tiếp/công chiếu) để thanh tua trên iPhone kéo mượt
+    const effDur = Math.max(currentVideoDuration, currentSeekableEndTime);
     return effDur > 0 ? Math.round(effDur) : 0;
   }
 
   async getSeekableRange(): Promise<{ start: number; end: number }> {
-    const effEnd = Math.max(currentSeekableEndTime, currentVideoDuration, Math.ceil(currentPositionSeconds));
+    const effEnd = Math.max(currentSeekableEndTime, currentVideoDuration);
     return {
       start: Math.max(0, Math.floor(currentSeekableStartTime)),
       end: Math.max(0, Math.round(effEnd))
@@ -1258,9 +1260,9 @@ wss.on('connection', (ws: WebSocket) => {
           currentSeekableEndTime = Math.max(currentSeekableEndTime, data.seekableEnd);
         }
 
-        // Cập nhật vị trí giây thực tế (bỏ qua trong 2.5s đầu sau khi người dùng vừa bấm tua để hỗ trợ DVR Live/Công chiếu không bị giật ngược)
+        // Cập nhật vị trí giây thực tế (bỏ qua trong 1.2s đầu sau khi người dùng vừa bấm tua để tránh giật ngược)
         if (typeof data.position === 'number' && data.position >= 0) {
-          if (Date.now() - lastSeekTimestamp > 2500) {
+          if (Date.now() - lastSeekTimestamp > 1200) {
             const prevPos = Math.floor(currentPositionSeconds);
             currentPositionSeconds = data.position;
             positionLastUpdated = Date.now();
@@ -1273,23 +1275,29 @@ wss.on('connection', (ws: WebSocket) => {
         // Cập nhật thời lượng thực (hoặc đỉnh live-edge đối với video Trực tiếp / Công chiếu)
         const candidateDur = Math.max(
           typeof data.duration === 'number' && data.duration > 0 ? data.duration : 0,
-          currentSeekableEndTime,
-          Math.ceil(currentPositionSeconds)
+          currentSeekableEndTime
         );
         if (candidateDur > 0) {
-          const roundedDur = Math.max(currentVideoDuration, Math.round(candidateDur));
-          const prevDur = currentVideoDuration;
-          if (roundedDur !== currentVideoDuration) {
-            currentVideoDuration = roundedDur;
-            currentSeekableEndTime = Math.max(currentSeekableEndTime, roundedDur);
-            // Chỉ ép phát lại NowPlaying (LOADING -> PLAYING) ở lần đầu nhận được duration hoặc khi duration nhảy > 15s (tránh spam mỗi 1s trên livestream làm khóa thanh tua)
-            if (prevDur === 0 || (Math.abs(roundedDur - prevDur) > 15 && Date.now() - lastDurationNotifyTime > 10000)) {
-              durationChanged = true;
-              shouldNotifyLounge = true;
-              lastDurationNotifyTime = Date.now();
-              console.log(`[Player Sync] Đã đồng bộ thời lượng / phạm vi tua của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
-            }
+          const roundedDur = Math.round(candidateDur);
+          const nextDur = currentSeekableStartTime > 0 ? Math.max(currentVideoDuration, roundedDur) : roundedDur;
+          currentVideoDuration = nextDur;
+          currentSeekableEndTime = Math.max(currentSeekableEndTime, nextDur);
+
+          // Thông báo ngay lập tức cho iPhone ở lần đầu có duration thực (lastNotifiedDuration === 0)
+          // hoặc khi duration thay đổi >= 1s (video thường) / >= 15s (video Trực tiếp đang tăng từng giây)
+          const isLiveTick = lastNotifiedDuration > 0 && Math.abs(nextDur - lastNotifiedDuration) <= 3;
+          if (
+            lastNotifiedDuration === 0 ||
+            (!isLiveTick && Math.abs(nextDur - lastNotifiedDuration) >= 1) ||
+            (isLiveTick && Math.abs(nextDur - lastNotifiedDuration) >= 15 && Date.now() - lastDurationNotifyTime > 10000)
+          ) {
+            durationChanged = true;
+            shouldNotifyLounge = true;
+            lastNotifiedDuration = nextDur;
+            lastDurationNotifyTime = Date.now();
+            console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
           }
+
           if (pendingDurationResolver) {
             const r = pendingDurationResolver;
             pendingDurationResolver = null;
@@ -1306,7 +1314,7 @@ wss.on('connection', (ws: WebSocket) => {
               positionLastUpdated = Date.now();
               shouldNotifyLounge = true;
             }
-          } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 2500) {
+          } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 1200) {
             isVideoPlaying = false;
             shouldNotifyLounge = true;
           } else if (data.playerState === 0) {
@@ -1329,8 +1337,8 @@ wss.on('connection', (ws: WebSocket) => {
           }
         }
 
-        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác (không ghi đè khi người dùng đang kéo tua)
-        if (Date.now() - lastSeekTimestamp > 2500 && (durationChanged || (shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 1000))) {
+        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác (luôn ưu tiên durationChanged ngay lập tức)
+        if (durationChanged || (Date.now() - lastSeekTimestamp > 1200 && shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 800)) {
           lastExternalNotifyTime = Date.now();
           const targetStatus = isVideoPlaying
             ? Constants.PLAYER_STATUSES.PLAYING
@@ -1388,7 +1396,11 @@ wss.on('connection', (ws: WebSocket) => {
           isVolumeMuted = false;
           handleVolumeAutomation(currentVolumeLevel, false, 'Remote WebSocket');
         } else if (data.action === 'seekRelative' && typeof data.value === 'number') {
-          let target = Math.max(0, Math.floor(currentPositionSeconds + data.value));
+          let basePos = currentPositionSeconds;
+          if (isVideoPlaying && Date.now() - lastSeekTimestamp > 1200) {
+            basePos += (Date.now() - positionLastUpdated) / 1000;
+          }
+          let target = Math.max(0, Math.round(basePos + data.value));
           const maxDur = Math.max(currentVideoDuration, currentSeekableEndTime);
           if (maxDur > 0 && target > maxDur) {
             target = Math.max(0, maxDur - 1);
@@ -1398,11 +1410,13 @@ wss.on('connection', (ws: WebSocket) => {
           lastSeekTimestamp = Date.now();
           data.action = 'seekTo';
           data.value = target;
+          ytPlayer.notifyExternalStateChange().catch(() => {});
         } else if (data.action === 'seekTo' && typeof data.value === 'number') {
           const target = Math.max(0, Math.floor(data.value));
           currentPositionSeconds = target;
           positionLastUpdated = Date.now();
           lastSeekTimestamp = Date.now();
+          ytPlayer.notifyExternalStateChange().catch(() => {});
         } else if (data.action === 'setQuality' && typeof data.value === 'string') {
           preferredQuality = data.value;
           persistentStore.set('tv.preferredQuality', preferredQuality).catch(() => {});
@@ -1441,6 +1455,8 @@ wss.on('connection', (ws: WebSocket) => {
           currentSeekableStartTime = 0;
           currentSeekableEndTime = 0;
           lastDurationNotifyTime = 0;
+          lastNotifiedDuration = 0;
+          lastSeekTimestamp = 0;
           currentPositionSeconds = 0;
           positionLastUpdated = Date.now();
           broadcastVideo({
@@ -1536,6 +1552,8 @@ app.post('/api/cast', async (req, res) => {
     currentSeekableStartTime = 0;
     currentSeekableEndTime = 0;
     lastDurationNotifyTime = 0;
+    lastNotifiedDuration = 0;
+    lastSeekTimestamp = 0;
     currentPositionSeconds = 0;
     positionLastUpdated = Date.now();
 

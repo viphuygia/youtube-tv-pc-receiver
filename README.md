@@ -1,6 +1,6 @@
 # 📺 YouTube TV Receiver for Windows (PC Leanback Cast)
 
-[![Version](https://img.shields.io/badge/Version-v1.2.0-red.svg)](https://github.com/viphuygia/youtube-tv-pc-receiver/releases)
+[![Version](https://img.shields.io/badge/Version-v1.3.0-red.svg)](https://github.com/viphuygia/youtube-tv-pc-receiver/releases)
 [![Node.js Version](https://img.shields.io/badge/Node.js-v18%2B-green.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -15,7 +15,24 @@
 
 Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Receiver**. Cast videos directly from the **official YouTube app on iPhone or Android** over local Wi-Fi (DIAL/SSDP protocol) or link using official 12-digit Google TV Codes. Engineered for a true zero-mouse living room TV experience with 1:1 timeline synchronization, multi-monitor memory, single-instance protection, and instant Phone-to-PC Standby controls.
 
-### 🌟 What's New in v1.2.0
+### 🌟 What's New in v1.3.0
+
+- ⏩ **Rock-Solid Video Seeking & Instant `+10s / -10s` Skip:**
+  - Eliminated fake `LOADING` state transitions during `Player.seek()`, sending direct `onStateChange(PLAYING)` updates to the phone so consecutive `+10s` double-taps and seek-bar scrubbing never stutter or reset.
+  - Fixed initial duration synchronization (`lastNotifiedDuration`) so real video duration is always delivered to the phone immediately without being blocked by seek guards.
+  - Prevented quality/caption re-initialization on `BUFFERING -> PLAYING` transitions after seeking, keeping playback completely smooth.
+  - Added PC keyboard shortcuts `ArrowLeft` (`-10s`) and `ArrowRight` (`+10s`) alongside `-30s / -10s / +10s / +30s` buttons on the Web Remote.
+- 🎬 **Video Resolution / Quality Selector (`4K`, `2K`, `1080p`, `720p`, `480p`, `Auto`):**
+  - Choose and persist your preferred playback resolution directly from the TV screen or Mobile Web Remote (`/remote`).
+- 💬 **Full Subtitles / Closed Captions (CC) Control:**
+  - Subtitles are off by default (`cc_load_policy=0`) with active module unloading (`captions` / `cc`) so even creator-forced captions stay off when disabled.
+  - Full support for toggling CC directly from the iPhone YouTube app (`setSubtitlesTrack`), TV UI (`CC` button or `C` key), and Web Remote (`OFF` / `Vietnamese` / `English`).
+- 📡 **Live Stream & Premiere DVR Rewind Support:**
+  - Synchronizes `seekableStartTime` and `seekableEndTime` from YouTube `progressState` so you can rewind Live streams and Premieres freely.
+- 🌙 **Reliable Auto-Standby on Video End:**
+  - Automatically returns to Standby Mode and minimizes the TV window 1 second after a video finishes when no next video is queued.
+
+### 🌟 Highlights from v1.2.0
 
 - ⚙️ **Custom Actions & Automation Settings (Phone Volume Trigger):**
   - **Volume = 0% / Mute Trigger:** Configure any executable, script, or application (`.exe`, `.bat`, PowerShell, terminal) to launch automatically when you pull volume to 0% or press Mute on your phone.
@@ -60,7 +77,7 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 #### Option 1: Standalone Windows Installer (Recommended for End-Users)
 > [!TIP]
 > **No Node.js or command line required!** The installer bundles an embedded portable Node.js runtime and native launcher.
-1. Download **`YouTube-TV-Receiver-Setup-v1.2.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) section.
+1. Download **`YouTube-TV-Receiver-Setup-v1.3.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) section.
 2. Run the installer and click **Next > Install**.
 3. Choose whether to create a Desktop icon and whether to **Auto-start on Windows boot**.
 4. Double-click the **YouTube TV Receiver** Desktop icon anytime to launch directly into Fullscreen Kiosk mode!
@@ -76,7 +93,7 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
    * Automatically installs dependencies on first run and opens in Kiosk mode.
 
 #### 📦 Building the Installer Yourself:
-Simply double-click **`build-installer.bat`**. It compiles the React frontend, bundles the backend, builds the C# native launcher, and generates `dist-installer\YouTube-TV-Receiver-Setup-v1.2.0.exe` using Inno Setup.
+Simply double-click **`build-installer.bat`**. It compiles the React frontend, bundles the backend, builds the C# native launcher, and generates `dist-installer\YouTube-TV-Receiver-Setup-v1.3.0.exe` using Inno Setup.
 
 ---
 
@@ -133,7 +150,24 @@ When running in Fullscreen Kiosk mode, the top-right control bar provides quick 
 
 Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu sóng YouTube** chuyên nghiệp không cần dùng chuột. Truyền video (Cast) trực tiếp từ ứng dụng **YouTube trên iPhone / Android** sang máy tính qua mạng Wi-Fi hoặc mã liên kết TV 12 chữ số chính thức. Đồng bộ chuẩn xác 1:1 thanh thời gian thực của từng video, hỗ trợ chọn và ghi nhớ màn hình phụ/TV, tính năng Chế độ ẩn TV giải phóng màn hình PC cùng bộ kích hoạt phím tắt linh hoạt từ điện thoại.
 
-### 🌟 Tính Năng Mới Trên Phiên Bản v1.2.0
+### 🌟 Tính Năng Mới Trên Phiên Bản v1.3.0
+
+- ⏩ **Tua Video & Nhảy Nhanh `+10s / -10s` Siêu Mượt & Ổn Định Tuyệt Đối:**
+  - Loại bỏ trạng thái `LOADING` giả lập khi tua (`Player.seek()`), gửi trực tiếp phản hồi `onStateChange(PLAYING)` về điện thoại giúp thao tác bấm đúp `+10s` liên tiếp hoặc kéo thanh trượt mượt mà 100%, không bị giật lùi hay mất bộ đếm.
+  - Khắc phục triệt để đồng bộ thời lượng thực (`lastNotifiedDuration`) ngay khi mở video, không bị chặn bởi bộ khóa tua.
+  - Chỉ áp dụng cấu hình Độ phân giải / Phụ đề 1 lần khi nạp video mới (không gọi lại khi chuyển `BUFFERING -> PLAYING` sau mỗi lần tua), loại bỏ hoàn toàn hiện tượng khựng hình sau khi tua.
+  - Bổ sung phím tắt bàn phím PC `Mũi tên Trái / Phải` (`-10s / +10s`) bên cạnh cụm nút `-30s / -10s / +10s / +30s` trên Web Remote.
+- 🎬 **Tùy Chỉnh Độ Phân Giải Video (`4K`, `2K`, `1080p`, `720p`, `480p`, `Auto`):**
+  - Chọn và ghi nhớ độ phân giải ưu tiên ngay trên giao diện TV hoặc trên trang điều khiển điện thoại (`/remote`).
+- 💬 **Bật / Tắt Phụ Đề (CC / Subtitles) Chủ Động:**
+  - Mặc định tắt phụ đề (`cc_load_policy=0`) và tự động gỡ module `captions` khi ở chế độ Tắt.
+  - Hỗ trợ bật/tắt phụ đề trực tiếp từ nút **CC trên app YouTube của iPhone**, nút **CC** trên màn hình TV (phím tắt `C`), hoặc trên Web Remote (`Tắt` / `Tiếng Việt` / `English`).
+- 📡 **Hỗ Trợ Tua Ngược (DVR Rewind) Cho Video Công Chiếu & Trực Tiếp:**
+  - Đồng bộ dải `seekableStartTime` và `seekableEndTime` giúp kéo lùi trên luồng Livestream / Premiere không bị văng về Live Head.
+- 🌙 **Tự Động Về Chế Độ Chờ (Standby) Khi Hết Video:**
+  - Tự động chuyển về màn hình Chế độ chờ và thu nhỏ cửa sổ TV sau 1 giây khi phát hết video và không còn bài tiếp theo trong hàng đợi.
+
+### 🌟 Các Nâng Cấp Từ Phiên Bản v1.2.0
 
 - ⚙️ **Hệ Thống Cài Đặt Hành Động Tùy Chỉnh & Tự Động Hóa (Trigger Âm Lượng iPhone):**
   - **Kích hoạt khi Âm lượng về 0% hoặc Mute (Ẩn TV):** Cấu hình bất kỳ ứng dụng, file thực thi hoặc script nào (ví dụ: `notepad.exe`, `calc.exe`, `C:\Path\MyScript.bat`, `wt.exe`) để tự động bật lên khi bạn kéo âm lượng về 0 hoặc bấm Tắt tiếng từ iPhone.
@@ -178,7 +212,7 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
 #### Cách 1: Tải bộ cài đặt 1-Click (Khuyên dùng cho người dùng cuối)
 > [!TIP]
 > **Không cần cài đặt Node.js hay mở dòng lệnh!** Bộ cài đặt đã nhúng sẵn Node.js portable và launcher native siêu nhẹ.
-1. Tải file **`YouTube-TV-Receiver-Setup-v1.2.0.exe`** từ mục [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases).
+1. Tải file **`YouTube-TV-Receiver-Setup-v1.3.0.exe`** từ mục [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases).
 2. Chạy file cài đặt, bấm **Next ➔ Install**.
 3. Bạn có thể tick chọn **Tạo biểu tượng ngoài Desktop** và **Khởi động cùng Windows khi bật máy**.
 4. Nhấp đúp vào icon **YouTube TV Receiver** ngoài Desktop để mở TV xem ngay!
@@ -192,7 +226,7 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
 2. **Khởi chạy ứng dụng:** Nhấp đúp chuột vào file **`start.bat`** (yêu cầu máy có sẵn Node.js v18+).
 
 #### 📦 Tự đóng gói file cài đặt Setup.exe:
-Chỉ cần nhấp đúp file **`build-installer.bat`**, hệ thống sẽ tự build frontend, bundle server và tạo ra file cài đặt `dist-installer\YouTube-TV-Receiver-Setup-v1.2.0.exe` thông qua Inno Setup.
+Chỉ cần nhấp đúp file **`build-installer.bat`**, hệ thống sẽ tự build frontend, bundle server và tạo ra file cài đặt `dist-installer\YouTube-TV-Receiver-Setup-v1.3.0.exe` thông qua Inno Setup.
 
 ---
 
