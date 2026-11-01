@@ -168,6 +168,12 @@
             <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
             <span>Toàn màn hình PC</span>
           </button>
+
+          <!-- Nút bật/tắt Chế độ chờ (Standby) -->
+          <button id="btn-standby" onclick="toggleStandby()" class="py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 active:scale-95 hover:bg-slate-800 text-xs font-semibold text-amber-300 flex items-center justify-center gap-1.5 transition-all col-span-2">
+            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+            <span id="standby-text">Chế độ chờ (Standby)</span>
+          </button>
         </div>
       </div>
     </div>
@@ -218,6 +224,37 @@
     let ws = null;
     let isPlaying = true;
     let isMuted = false;
+    let isStandby = true;
+
+    function updateStandbyUi(standby) {
+      isStandby = standby;
+      const btn = document.getElementById('btn-standby');
+      const text = document.getElementById('standby-text');
+      if (!btn || !text) return;
+      if (standby) {
+        text.textContent = '▶️ Bật TV / Đánh thức';
+        btn.className = 'py-2.5 px-3 rounded-xl bg-emerald-950/70 border border-emerald-600/60 active:scale-95 hover:bg-emerald-900 text-xs font-semibold text-emerald-300 flex items-center justify-center gap-1.5 transition-all col-span-2 shadow-md';
+        document.getElementById('video-title').textContent = 'TV đang ở Chế độ chờ (Standby)';
+        document.getElementById('video-id-display').textContent = 'Video đã dừng · Sẵn sàng nhận Cast';
+        document.getElementById('playing-source').textContent = 'Standby';
+      } else {
+        text.textContent = '🌙 Chế độ chờ (Standby)';
+        btn.className = 'py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 active:scale-95 hover:bg-slate-800 text-xs font-semibold text-amber-300 flex items-center justify-center gap-1.5 transition-all col-span-2';
+      }
+    }
+
+    function toggleStandby() {
+      const next = !isStandby;
+      updateStandbyUi(next);
+      fetch('/api/standby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ standby: next })
+      }).catch(() => {});
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'control', action: next ? 'standby' : 'wake' }));
+      }
+    }
 
     function connectWs() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -242,7 +279,20 @@
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            if (data.type === 'standby_state') {
+              updateStandbyUi(Boolean(data.isStandby));
+              if (data.video) updatePlayingInfo(data.video);
+              return;
+            }
+            if (data.type === 'control') {
+              if (data.action === 'standby') updateStandbyUi(true);
+              if (data.action === 'wake') updateStandbyUi(false);
+            }
+            if (data.isStandby !== undefined) {
+              updateStandbyUi(Boolean(data.isStandby));
+            }
             if (data.type === 'cast_video' && data.video) {
+              updateStandbyUi(false);
               updatePlayingInfo(data.video);
             }
             if (typeof data.volume === 'number') {

@@ -58,6 +58,16 @@ export const translations = {
     zoomQrTip: "Bấm để phóng to mã QR",
     qrRemotePill: "QR Remote",
     mutedLabel: "Tắt tiếng",
+    standbyModeTitle: "Chế độ chờ (Standby)",
+    standbyStatusListening: "Đang lắng nghe kết nối YouTube từ iPhone / Android...",
+    standbyGuideTitle: "Cách phát video lên TV:",
+    standbyStep1: "Mở ứng dụng YouTube trên điện thoại iPhone / Android hoặc iPad.",
+    standbyStep2: "Bấm vào biểu tượng Cast 📺 ở góc trên video.",
+    standbyStep3: "Chọn thiết bị \"%s\" hoặc nhập mã TV 12 số bên dưới để phát ngay.",
+    standbyWakeSampleBtn: "▶️ Phát video mẫu",
+    standbyEnterBtn: "Chế độ chờ",
+    standbyActiveBadge: "TV Đang ở Chế độ chờ",
+    standbyReadySub: "Video đã dừng hoàn toàn · Sẵn sàng tự động bật khi điện thoại kết nối",
     footerText: "YouTube Cast Receiver Lite cho máy tính Windows · Hỗ trợ DIAL & SSDP Multicast trên cùng mạng Wi-Fi"
   },
   en: {
@@ -117,6 +127,16 @@ export const translations = {
     zoomQrTip: "Click to zoom QR code",
     qrRemotePill: "QR Remote",
     mutedLabel: "Muted",
+    standbyModeTitle: "Standby Mode",
+    standbyStatusListening: "Listening for YouTube Cast connections from iPhone / Android...",
+    standbyGuideTitle: "How to Cast Video to TV:",
+    standbyStep1: "Open the YouTube app on your iPhone, Android, or iPad.",
+    standbyStep2: "Tap the Cast 📺 icon at the top of the video.",
+    standbyStep3: "Select \"%s\" or enter the 12-digit TV Code below to stream immediately.",
+    standbyWakeSampleBtn: "▶️ Play Sample Video",
+    standbyEnterBtn: "Standby",
+    standbyActiveBadge: "TV is in Standby Mode",
+    standbyReadySub: "Video playback paused & stopped · Will auto-start full screen when phone connects",
     footerText: "YouTube Cast Receiver Lite for Windows PC · Supports DIAL & SSDP Multicast over local Wi-Fi"
   }
 };

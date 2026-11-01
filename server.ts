@@ -74,11 +74,15 @@ const localIp = getLocalIpAddress();
 const pcHostname = os.hostname() || 'Windows-PC';
 const DEVICE_NAME = `Youtube TV (${pcHostname})`;
 
+// Trạng thái Chế độ chờ (Standby) - Mặc định bật khi khởi động app và khi ngắt kết nối
+// Khi ở chế độ chờ: video hoàn toàn không chạy để tiết kiệm tài nguyên, TV vẫn lắng nghe kết nối từ điện thoại
+let isStandby = true;
+
 // Store current casted video and connected clients
 let currentVideo = {
-  videoId: 'LXb3EKWsInQ', // Default 4K Nature relaxation
-  title: 'Thiên Nhiên 4K Ultra HD',
-  isPlaying: true,
+  videoId: '', // Rỗng khi ở chế độ chờ
+  title: 'Chế độ chờ (Standby)',
+  isPlaying: false,
   startSeconds: 0,
   timestamp: Date.now(),
   source: 'Chế độ chờ (Standby)'
@@ -93,18 +97,56 @@ let isVolumeMuted = false;
 let currentPositionSeconds = 0;
 let currentVideoDuration = 0; // Thời lượng thực của video (giây) đồng bộ từ YouTube IFrame Player
 let positionLastUpdated = Date.now();
-let isVideoPlaying = true;
+let isVideoPlaying = false;
 let lastSeekTimestamp = 0; // Chống nhảy ngược về 0s khi đang tua
 let lastExternalNotifyTime = 0;
 
 // Resolver chờ thời lượng thực từ trình phát khi bắt đầu video mới
 let pendingDurationResolver: ((dur: number) => void) | null = null;
 
+function broadcastStandbyState(standby: boolean) {
+  isStandby = standby;
+  if (standby) {
+    isVideoPlaying = false;
+    currentVideo.isPlaying = false;
+  }
+  const message = JSON.stringify({
+    type: 'standby_state',
+    isStandby: standby,
+    video: currentVideo
+  });
+  connectedClients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
+function enterStandbyMode(reason: string = 'Ngắt kết nối') {
+  console.log(`[YouTube Cast Standby Trigger] Kích hoạt Chế độ chờ (Standby) [Lý do: ${reason}]. Dừng phát video.`);
+  isStandby = true;
+  isVideoPlaying = false;
+  currentPositionSeconds = 0;
+  ytPlayer.stop().catch(() => {});
+  broadcastStandbyState(true);
+  broadcastControl({ action: 'standby' });
+}
+
+function exitStandbyMode(reason: string = 'Bắt đầu phát') {
+  console.log(`[YouTube Cast Standby Trigger] Thoát Chế độ chờ -> Bắt đầu phát video [Lý do: ${reason}].`);
+  isStandby = false;
+  broadcastStandbyState(false);
+  broadcastControl({ action: 'wake' });
+}
+
 function broadcastVideo(videoData: typeof currentVideo) {
+  isStandby = false;
   currentVideo = videoData;
+  isVideoPlaying = videoData.isPlaying;
   const message = JSON.stringify({
     type: 'cast_video',
     video: currentVideo,
+    isStandby: false,
     volume: currentVolumeLevel,
     isMuted: isVolumeMuted
   });
@@ -573,10 +615,9 @@ const ytReceiver = new YouTubeCastReceiver(ytPlayer, {
     screenName: DEVICE_NAME
   },
   dial: {
-    friendlyName: DEVICE_NAME,
     corsAllowOrigins: true,
     bindToAddresses: [localIp]
-  },
+  } as any,
   app: {
     enableAutoplayOnConnect: true,
     playlistRequestHandler: new FastPlaylistRequestHandler() as any,
@@ -597,8 +638,14 @@ ytReceiver.on('senderConnect', (sender: any) => {
   broadcastControl({ action: 'senderConnected', senderName: sender?.name });
 });
 
-ytReceiver.on('senderDisconnect', (sender: any) => {
-  console.log(`[YouTube Cast] Disconnected from sender: ${sender?.name || 'iPhone'}`);
+ytReceiver.on('senderDisconnect', (sender: any, implicit?: boolean) => {
+  const senderName = sender?.name || 'Thiết bị';
+  console.log(`[YouTube Cast] Disconnected from sender: ${senderName} (implicit: ${implicit})`);
+  // Kiểm tra số thiết bị còn kết nối
+  const remainingSenders = ytReceiver.getConnectedSenders ? ytReceiver.getConnectedSenders() : [];
+  if (!remainingSenders || remainingSenders.length === 0) {
+    enterStandbyMode(`Sender "${senderName}" đã ngắt kết nối`);
+  }
 });
 
 // WebSocket connection for the TV screen and iPhone Remote
@@ -607,6 +654,7 @@ wss.on('connection', (ws: WebSocket) => {
   ws.send(JSON.stringify({ 
     type: 'cast_video', 
     video: currentVideo,
+    isStandby,
     pairingCode: formatPairingCode(realPairingCode),
     volume: currentVolumeLevel,
     isMuted: isVolumeMuted
@@ -681,6 +729,16 @@ wss.on('connection', (ws: WebSocket) => {
             ytPlayer.notifyExternalStateChange(targetStatus).catch(() => {});
           }
         }
+        return;
+      }
+
+      if (data.type === 'standby' || (data.type === 'control' && data.action === 'standby')) {
+        enterStandbyMode('Yêu cầu từ Remote/Client');
+        return;
+      }
+
+      if (data.type === 'wake' || (data.type === 'control' && data.action === 'wake')) {
+        exitStandbyMode('Yêu cầu từ Remote/Client');
         return;
       }
 
@@ -827,6 +885,7 @@ app.get('/api/status', (req, res) => {
     pairingCode: formatPairingCode(realPairingCode),
     rawPairingCode: realPairingCode,
     isLoungeConnected: (ytReceiver.status as string) === 'running',
+    isStandby,
     currentVideo,
     position: Math.floor(currentPositionSeconds),
     duration: currentVideoDuration,
@@ -834,6 +893,23 @@ app.get('/api/status', (req, res) => {
     isMuted: isVolumeMuted,
     connectedScreenClients: connectedClients.size
   });
+});
+
+// Chuyển đổi thủ công Chế độ chờ (Standby) từ API / Web / Remote
+app.post('/api/standby', (req, res) => {
+  const { standby } = req.body || {};
+  if (standby === false) {
+    exitStandbyMode('Yêu cầu bật từ API / Web');
+    if (!currentVideo.videoId) {
+      currentVideo.videoId = 'LXb3EKWsInQ';
+      currentVideo.title = 'Thiên Nhiên 4K Ultra HD';
+      currentVideo.source = 'Bật từ Chế độ chờ';
+      broadcastVideo(currentVideo);
+    }
+  } else {
+    enterStandbyMode('Yêu cầu Chế độ chờ từ API / Web');
+  }
+  return res.json({ success: true, isStandby });
 });
 
 // Refresh pairing code endpoint

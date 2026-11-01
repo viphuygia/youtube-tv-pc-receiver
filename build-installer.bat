@@ -15,7 +15,7 @@ if not exist "%ISCC_PATH%" (
 )
 
 if not exist "%ISCC_PATH%" (
-    echo [LOI] Khong tim thay Inno Setup 6 (ISCC.exe)!
+    echo [LOI] Khong tim thay Inno Setup 6 ISCC.exe
     pause
     exit /b 1
 )
@@ -23,7 +23,7 @@ if not exist "%ISCC_PATH%" (
 echo [1/5] Dang build frontend Vite...
 call npm run build
 if %errorlevel% neq 0 (
-    echo [LOI] Build frontend that bai!
+    echo [LOI] Build frontend that bai
     pause
     exit /b 1
 )
@@ -31,7 +31,7 @@ if %errorlevel% neq 0 (
 echo [2/5] Dang bundle backend server.ts...
 call npx esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile="build-staging\server.mjs"
 
-echo [3/5] Dang bien dich C# Native Launcher (YouTubeTV.exe)...
+echo [3/5] Dang bien dich C# Native Launcher YouTubeTV.exe...
 call C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /win32icon:resources\app.ico /out:resources\YouTubeTV.exe resources\Launcher.cs
 
 echo [4/5] Dang chuan bi thu muc build-staging...
@@ -55,11 +55,11 @@ echo [5/5] Dang bien dich bo cai dat bang Inno Setup...
 if %errorlevel% equ 0 (
     echo.
     echo ========================================================
-    echo   DONG GOI THANH CONG!
+    echo   DONG GOI THANH CONG
     echo   File cai dat nam tai:
     echo   dist-installer\YouTube-TV-Receiver-Setup-v1.0.0.exe
     echo ========================================================
 ) else (
-    echo [LOI] Bien dich bo cai dat that bai!
+    echo [LOI] Bien dich bo cai dat that bai
 )
 pause

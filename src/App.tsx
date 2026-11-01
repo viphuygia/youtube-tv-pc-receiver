@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Cast, Smartphone, Play, Maximize2, Minimize2, 
   Volume2, VolumeX, CheckCircle2, Copy, ExternalLink,
-  Laptop, RefreshCw, Terminal, QrCode, Globe, Power, Monitor
+  Laptop, RefreshCw, Terminal, QrCode, Globe, Power, Monitor,
+  Moon, Clock, Sparkles, Tv
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { translations, Lang } from './i18n';
@@ -27,16 +28,19 @@ interface DisplayInfo {
 }
 
 export default function App() {
+  const [isStandby, setIsStandby] = useState<boolean>(true);
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+
   const [video, setVideo] = useState<CastedVideo>({
-    videoId: 'LXb3EKWsInQ', // Default 4K Nature relaxation
-    title: 'Thiên Nhiên 4K Ultra HD',
-    isPlaying: true,
+    videoId: '', // Rỗng khi ở chế độ chờ
+    title: 'Chế độ chờ (Standby)',
+    isPlaying: false,
     startSeconds: 0,
     timestamp: Date.now(),
     source: 'Chế độ chờ (Standby)'
   });
 
-  const [initialVideoId] = useState<string>(video.videoId);
+  const [initialVideoId] = useState<string>('LXb3EKWsInQ');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
@@ -351,6 +355,23 @@ export default function App() {
     } catch {}
   };
 
+  // Chuyển đổi qua lại giữa Chế độ chờ (Standby) và Phát video
+  const handleToggleStandby = async () => {
+    const next = !isStandby;
+    setIsStandby(next);
+    if (next) {
+      sendIframeCommand('stopVideo', []);
+      setVideo(prev => ({ ...prev, isPlaying: false }));
+    }
+    try {
+      await fetch('/api/standby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ standby: next })
+      });
+    } catch {}
+  };
+
   // Connect WebSocket to receive real-time cast commands from iPhone / server
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -367,21 +388,38 @@ export default function App() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (data.type === 'cast_video' && data.video?.videoId) {
-              const incomingVid = data.video.videoId;
-              const startSec = Number(data.video.startSeconds) || 0;
-              const isInitialSameDefault = !hasConnectedWsOnceRef.current && incomingVid === currentVideoIdRef.current && startSec === 0;
-              hasConnectedWsOnceRef.current = true;
 
-              currentVideoIdRef.current = incomingVid;
-              setVideo(data.video);
+            if (data.type === 'standby_state') {
+              const nextStandby = Boolean(data.isStandby);
+              setIsStandby(nextStandby);
+              if (nextStandby) {
+                sendIframeCommand('stopVideo', []);
+                setVideo(prev => ({ ...prev, isPlaying: false }));
+              }
+              if (data.video) {
+                setVideo(data.video);
+              }
+              return;
+            }
+
+            if (data.type === 'cast_video') {
+              if (data.isStandby !== undefined) {
+                setIsStandby(Boolean(data.isStandby));
+              } else if (data.video?.videoId) {
+                setIsStandby(false);
+              }
 
               if (typeof data.pairingCode === 'string' && data.pairingCode) {
                 setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
               }
 
-              // Nếu không phải gói chào ban đầu trùng với video mặc định đang phát, tải ngay video mới
-              if (!isInitialSameDefault) {
+              if (data.video?.videoId) {
+                const incomingVid = data.video.videoId;
+                const startSec = Number(data.video.startSeconds) || 0;
+                setIsStandby(false);
+                currentVideoIdRef.current = incomingVid;
+                setVideo(data.video);
+
                 playerTimeRef.current = startSec;
                 playerDurationRef.current = 0;
                 activateYouTubeBridge();
@@ -395,13 +433,22 @@ export default function App() {
                     sendIframeCommand('unMute', []);
                   }
                 }, 200);
+              } else if (data.video) {
+                setVideo(data.video);
               }
             } else if (data.type === 'pairing_code' && data.pairingCode) {
               setStatusInfo(prev => ({ ...prev, pairingCode: data.pairingCode }));
             } else if (data.type === 'control') {
-              if (data.action === 'updateTitle' && data.title) {
+              if (data.action === 'standby') {
+                setIsStandby(true);
+                sendIframeCommand('stopVideo', []);
+                setVideo(prev => ({ ...prev, isPlaying: false }));
+              } else if (data.action === 'wake') {
+                setIsStandby(false);
+              } else if (data.action === 'updateTitle' && data.title) {
                 setVideo(prev => (prev.videoId === data.videoId ? { ...prev, title: data.title } : prev));
               } else if (data.action === 'play') {
+                setIsStandby(false);
                 sendIframeCommand('playVideo', []);
                 setVideo(prev => ({ ...prev, isPlaying: true }));
               } else if (data.action === 'pause') {
@@ -536,6 +583,7 @@ export default function App() {
 
   // Unified video cast helper: updates local screen AND syncs to server so iPhone Remote updates
   const castVideoOnScreen = (videoId: string, title?: string, source: string = 'Màn hình PC') => {
+    setIsStandby(false);
     currentVideoIdRef.current = videoId;
     playerTimeRef.current = 0;
     playerDurationRef.current = 0;
@@ -777,8 +825,8 @@ export default function App() {
           ref={containerRef}
           className={
             isFullscreen 
-              ? 'fixed inset-0 w-screen h-screen z-[99999] bg-black rounded-none border-0 overflow-hidden flex items-center justify-center'
-              : 'relative w-full aspect-video rounded-3xl overflow-hidden bg-black border border-slate-800 shadow-2xl transition-all duration-300'
+              ? 'fixed inset-0 w-screen h-screen z-[99999] bg-[#05070d] rounded-none border-0 overflow-hidden flex items-center justify-center'
+              : 'relative w-full aspect-video rounded-3xl overflow-hidden bg-[#05070d] border border-slate-800 shadow-2xl transition-all duration-300'
           }
         >
           {/* Ambient light glow behind screen */}
@@ -789,117 +837,274 @@ export default function App() {
             />
           )}
 
-          {/* Real YouTube Player Embed with Two-Way JS API Bridge */}
-          <iframe
-            ref={iframeRef}
-            id="yt-tv-iframe"
-            onLoad={() => {
-              activateYouTubeBridge();
-              setTimeout(() => {
-                activateYouTubeBridge();
-                sendIframeCommand('setVolume', [volumeRef.current]);
-              }, 500);
-            }}
-            src={`https://www.youtube.com/embed/${initialVideoId}?autoplay=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
-            title={video.title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            className="w-full h-full border-0 select-none relative z-10"
-          />
+          {isStandby ? (
+            <div className="relative w-full h-full flex flex-col justify-between p-4 sm:p-8 md:p-12 z-10 bg-gradient-to-br from-[#080a14] via-[#040509] to-[#0a0d1a] text-white select-none">
+              {/* Soft ambient glow */}
+              <div aria-hidden="true" className="absolute inset-0 pointer-events-none opacity-25 blur-3xl bg-radial from-red-600/30 via-indigo-600/20 to-transparent" />
 
-          {/* Floating Source Tag Badge */}
-          <div className="absolute top-4 left-4 z-20 pointer-events-none flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 text-xs">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="font-semibold text-white truncate max-w-[220px]">
-              {video.source}
-            </span>
-          </div>
+              {/* Top Bar of Standby Screen */}
+              <div className="relative z-20 flex items-center justify-between gap-3">
+                {/* Listening Status Pill */}
+                <div className="flex items-center gap-2.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs sm:text-sm font-medium shadow-lg backdrop-blur-md">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                  <span className="truncate max-w-[200px] sm:max-w-none">{t.standbyStatusListening}</span>
+                </div>
 
-          {/* Fullscreen control overlay (Top Right) */}
-          <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-            {/* TV Code badge right next to QR icon */}
-            <div 
-              onClick={() => setShowQrModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-2 text-xs shadow-lg cursor-pointer hover:border-amber-400/60"
-              title={lang === 'vi' ? 'Mã liên kết TV (Bấm để xem chi tiết)' : 'TV Pairing Code (Click to view)'}
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-slate-300 font-bold uppercase text-[10px]">
-                {lang === 'vi' ? 'Mã TV' : 'TV Code'}:
-              </span>
-              <span className="font-mono font-black text-amber-300 tracking-wider text-xs sm:text-sm">
-                {statusInfo.pairingCode || '...'}
-              </span>
+                {/* Floating Action Controls */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleOpenDisplayModal}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-white backdrop-blur-md border border-slate-700/80 transition-all flex items-center gap-1.5 text-xs shadow-md"
+                    title={t.monitorModalTitle}
+                  >
+                    <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="hidden sm:inline font-semibold">{t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setLang(l => l === 'vi' ? 'en' : 'vi')}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-white backdrop-blur-md border border-slate-700/80 transition-all flex items-center gap-1.5 text-xs font-semibold shadow-md"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-slate-400" />
+                    <span>{lang.toUpperCase()}</span>
+                  </button>
+
+                  {isFullscreen && (
+                    <button
+                      onClick={toggleFullscreen}
+                      className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-white backdrop-blur-md border border-slate-700/80 transition-all text-xs shadow-md"
+                      title={t.exitFullscreenBtn}
+                    >
+                      <Minimize2 className="w-3.5 h-3.5 text-red-400" />
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleQuitApp}
+                    className="px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white backdrop-blur-md border border-red-400/40 transition-all flex items-center gap-1.5 text-xs font-bold shadow-lg shadow-red-600/40"
+                    title={t.quitAppTooltip}
+                  >
+                    <Power className="w-3.5 h-3.5" />
+                    <span>{t.quitAppBtn}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Center Stage: Clock, Date, Device Name & Pairing Cards */}
+              <div className="relative z-20 flex-1 flex flex-col items-center justify-center my-3 sm:my-6 text-center max-w-4xl mx-auto w-full">
+                {/* Live Digital Clock */}
+                <div className="font-mono text-4xl sm:text-7xl md:text-8xl font-black text-white tracking-widest drop-shadow-2xl">
+                  {currentTime.toLocaleTimeString(lang === 'vi' ? 'vi-VN' : 'en-US', { hour12: false })}
+                </div>
+
+                {/* Localized Date */}
+                <div className="text-slate-400 text-xs sm:text-base font-medium tracking-wide mt-1.5 sm:mt-2 capitalize">
+                  {currentTime.toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                </div>
+
+                {/* Device Name Badge */}
+                <div className="mt-3 sm:mt-4 inline-flex items-center gap-2 px-3.5 py-1 sm:px-4 sm:py-1.5 rounded-2xl bg-red-600/15 border border-red-500/30 text-white shadow-lg">
+                  <Cast className="w-4 h-4 text-red-500 animate-pulse" />
+                  <span className="font-bold text-xs sm:text-sm tracking-tight">{statusInfo.deviceName}</span>
+                </div>
+
+                {/* Pairing Code & QR Remote Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-4 sm:mt-6 w-full max-w-2xl text-left">
+                  {/* Pairing Code Card */}
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-md shadow-xl flex flex-col justify-between">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase text-red-400 font-bold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>{t.tvCodeHeader}</span>
+                      </div>
+                      <div className="text-xl sm:text-3xl font-black font-mono text-amber-300 tracking-wider mt-1">
+                        {statusInfo.pairingCode || t.refreshing}
+                      </div>
+                      <div className="text-[10px] sm:text-[11px] text-slate-400 mt-1 line-clamp-2">
+                        {t.tvCodeSub}
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <button
+                        onClick={handleRefreshCode}
+                        disabled={isRefreshing}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium flex items-center gap-1 transition-all"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-red-400' : ''}`} />
+                        <span>{t.refreshCode}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* QR Remote Card */}
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-md shadow-xl flex items-center gap-3">
+                    <div 
+                      onClick={() => setShowQrModal(true)} 
+                      className="bg-white p-1.5 rounded-xl shrink-0 shadow-lg cursor-pointer hover:scale-105 transition-transform"
+                      title={t.zoomQrTip}
+                    >
+                      {qrCodeUrl ? (
+                        <img src={qrCodeUrl} alt="QR Code Remote" className="w-14 h-14 sm:w-16 sm:h-16 object-contain" />
+                      ) : (
+                        <div className="w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-[10px] text-slate-500">{t.refreshing}</div>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <QrCode className="w-3.5 h-3.5 text-red-500" />
+                        <span>{t.turnPhoneToRemote}</span>
+                      </div>
+                      <p className="text-[10px] sm:text-[11px] text-slate-300 leading-snug line-clamp-2">
+                        {t.scanQrHelp}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Bar: Instructions & Quick Wake Button */}
+              <div className="relative z-20 flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-800/60 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="text-[10px] sm:text-xs">
+                    {t.standbyStep3.replace('%s', statusInfo.deviceName)}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => castVideoOnScreen('LXb3EKWsInQ', 'Thiên Nhiên 4K Ultra HD', 'Phát thử từ Chế độ chờ')}
+                  className="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-white text-xs font-semibold flex items-center gap-1.5 shadow-lg hover:border-emerald-400/50 transition-all shrink-0"
+                >
+                  <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
+                  <span>{t.standbyWakeSampleBtn}</span>
+                </button>
+              </div>
             </div>
-
-            <button
-              onClick={() => setShowQrModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-red-500/50"
-              title="Quét mã QR để điều khiển từ xa bằng iPhone"
-            >
-              <QrCode className="w-4 h-4 text-red-400 animate-pulse" />
-              <span className="font-semibold text-slate-100 hidden sm:inline">QR Remote</span>
-            </button>
-
-            {/* Nút chọn Màn hình (Lưu tự động cho những lần mở sau) */}
-            <button
-              onClick={handleOpenDisplayModal}
-              className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-emerald-400/60"
-              title={t.monitorModalTitle}
-            >
-              <Monitor className="w-4 h-4 text-emerald-400" />
-              <span className="font-semibold text-slate-100">
-                {t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}
-              </span>
-            </button>
-
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs">
-              <button
-                onClick={() => {
-                  setIsMuted(prev => {
-                    const next = !prev;
-                    sendIframeCommand(next ? 'mute' : 'unMute', []);
-                    return next;
-                  });
+          ) : (
+            <>
+              {/* Real YouTube Player Embed with Two-Way JS API Bridge */}
+              <iframe
+                ref={iframeRef}
+                id="yt-tv-iframe"
+                onLoad={() => {
+                  activateYouTubeBridge();
+                  setTimeout(() => {
+                    activateYouTubeBridge();
+                    sendIframeCommand('setVolume', [volumeRef.current]);
+                  }, 500);
                 }}
-                className="hover:text-red-400 transition-colors"
-                title={isMuted ? 'Bật tiếng (M)' : 'Tắt tiếng (M)'}
-              >
-                {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
-              </button>
-              <span className="font-mono text-[11px] font-bold text-slate-300">
-                {isMuted ? t.mutedLabel : `${volume}%`}
-              </span>
-            </div>
+                src={`https://www.youtube.com/embed/${video.videoId || initialVideoId}?autoplay=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`}
+                title={video.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                className="w-full h-full border-0 select-none relative z-10"
+              />
 
-            <button
-              onClick={toggleFullscreen}
-              className="p-2 rounded-xl bg-black/75 hover:bg-black/90 text-white backdrop-blur-md border border-white/10 transition-colors"
-              title={isFullscreen ? t.exitFullscreenBtn : t.fullscreenBtn}
-            >
-              {isFullscreen ? <Minimize2 className="w-4 h-4 text-red-400" /> : <Maximize2 className="w-4 h-4" />}
-            </button>
+              {/* Floating Source Tag Badge */}
+              <div className="absolute top-4 left-4 z-20 pointer-events-none flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 text-xs">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="font-semibold text-white truncate max-w-[220px]">
+                  {video.source}
+                </span>
+              </div>
 
-            {/* Nút Tắt App trực tiếp trên màn hình Fullscreen */}
-            <button
-              onClick={handleQuitApp}
-              className="px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white backdrop-blur-md border border-red-400/40 transition-all flex items-center gap-1.5 text-xs font-bold shadow-lg shadow-red-600/40"
-              title={t.quitAppTooltip}
-            >
-              <Power className="w-3.5 h-3.5" />
-              <span>{t.quitAppBtn}</span>
-            </button>
-          </div>
+              {/* Fullscreen control overlay (Top Right) */}
+              <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+                {/* TV Code badge right next to QR icon */}
+                <div 
+                  onClick={() => setShowQrModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-2 text-xs shadow-lg cursor-pointer hover:border-amber-400/60"
+                  title={lang === 'vi' ? 'Mã liên kết TV (Bấm để xem chi tiết)' : 'TV Pairing Code (Click to view)'}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-slate-300 font-bold uppercase text-[10px]">
+                    {lang === 'vi' ? 'Mã TV' : 'TV Code'}:
+                  </span>
+                  <span className="font-mono font-black text-amber-300 tracking-wider text-xs sm:text-sm">
+                    {statusInfo.pairingCode || '...'}
+                  </span>
+                </div>
 
-          {/* Floating exit fullscreen button (Top Left when Fullscreen) */}
-          {isFullscreen && (
-            <button
-              onClick={toggleFullscreen}
-              className="absolute top-5 left-5 z-[100000] px-4 py-2 bg-black/85 hover:bg-black text-white text-xs font-semibold rounded-2xl border border-white/20 backdrop-blur-md transition-all flex items-center gap-2 shadow-2xl"
-            >
-              <Minimize2 className="w-4 h-4 text-red-500" />
-              <span>{lang === 'vi' ? 'Thu nhỏ (Bấm ESC hoặc F)' : 'Exit Fullscreen (ESC / F)'}</span>
-            </button>
+                <button
+                  onClick={() => setShowQrModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-red-500/50"
+                  title="Quét mã QR để điều khiển từ xa bằng iPhone"
+                >
+                  <QrCode className="w-4 h-4 text-red-400 animate-pulse" />
+                  <span className="font-semibold text-slate-100 hidden sm:inline">QR Remote</span>
+                </button>
+
+                {/* Nút chuyển sang Chế độ chờ (Standby) thủ công */}
+                <button
+                  onClick={handleToggleStandby}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-amber-300 backdrop-blur-md border border-amber-400/30 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-amber-400/60"
+                  title={t.standbyModeTitle}
+                >
+                  <Moon className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="font-semibold hidden sm:inline">{t.standbyEnterBtn}</span>
+                </button>
+
+                {/* Nút chọn Màn hình (Lưu tự động cho những lần mở sau) */}
+                <button
+                  onClick={handleOpenDisplayModal}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-emerald-400/60"
+                  title={t.monitorModalTitle}
+                >
+                  <Monitor className="w-4 h-4 text-emerald-400" />
+                  <span className="font-semibold text-slate-100">
+                    {t.monitorBtn} {selectedDisplay ? selectedDisplay.id : 1}
+                  </span>
+                </button>
+
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs">
+                  <button
+                    onClick={() => {
+                      setIsMuted(prev => {
+                        const next = !prev;
+                        sendIframeCommand(next ? 'mute' : 'unMute', []);
+                        return next;
+                      });
+                    }}
+                    className="hover:text-red-400 transition-colors"
+                    title={isMuted ? 'Bật tiếng (M)' : 'Tắt tiếng (M)'}
+                  >
+                    {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+                  </button>
+                  <span className="font-mono text-[11px] font-bold text-slate-300">
+                    {isMuted ? t.mutedLabel : `${volume}%`}
+                  </span>
+                </div>
+
+                <button
+                  onClick={toggleFullscreen}
+                  className="p-2 rounded-xl bg-black/75 hover:bg-black/90 text-white backdrop-blur-md border border-white/10 transition-colors"
+                  title={isFullscreen ? t.exitFullscreenBtn : t.fullscreenBtn}
+                >
+                  {isFullscreen ? <Minimize2 className="w-4 h-4 text-red-400" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+
+                {/* Nút Tắt App trực tiếp trên màn hình Fullscreen */}
+                <button
+                  onClick={handleQuitApp}
+                  className="px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white backdrop-blur-md border border-red-400/40 transition-all flex items-center gap-1.5 text-xs font-bold shadow-lg shadow-red-600/40"
+                  title={t.quitAppTooltip}
+                >
+                  <Power className="w-3.5 h-3.5" />
+                  <span>{t.quitAppBtn}</span>
+                </button>
+              </div>
+
+              {/* Floating exit fullscreen button (Top Left when Fullscreen) */}
+              {isFullscreen && (
+                <button
+                  onClick={toggleFullscreen}
+                  className="absolute top-5 left-5 z-[100000] px-4 py-2 bg-black/85 hover:bg-black text-white text-xs font-semibold rounded-2xl border border-white/20 backdrop-blur-md transition-all flex items-center gap-2 shadow-2xl"
+                >
+                  <Minimize2 className="w-4 h-4 text-red-500" />
+                  <span>{lang === 'vi' ? 'Thu nhỏ (Bấm ESC hoặc F)' : 'Exit Fullscreen (ESC / F)'}</span>
+                </button>
+              )}
+            </>
           )}
         </div>
 

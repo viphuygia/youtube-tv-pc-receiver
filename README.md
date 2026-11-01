@@ -16,6 +16,7 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 
 ### ✨ Key Features
 
+- 🌙 **Smart Standby Ambient Mode & Auto-Wake Trigger:** Automatically enters an elegant power-saving Standby Mode on startup or whenever your phone disconnects (stopping all background video/audio playback, zero CPU/GPU waste). The TV continues actively listening in the background via DIAL/SSDP multicast & Google Lounge, and automatically wakes up into full video playback the moment your phone connects or streams a video! Features a live digital clock, date, 12-digit Google TV code, and phone QR remote on the ambient screen.
 - 📡 **Native YouTube Cast (iOS & Android):** Automatic discovery over local Wi-Fi via DIAL/SSDP protocol with dynamic device naming **`Youtube TV (<PC-Hostname>)`** (easy to distinguish when installed on multiple PCs), plus instant pairing via official 12-digit YouTube TV code.
 - ⏱️ **True 1:1 Duration & Timeline Sync:** Two-way YouTube IFrame Widget API bridge (`infoDelivery` + `player_sync`) synchronizes the exact video length and real-time playback position with your phone's scrub bar and `+/- 10s` seek buttons.
 - 🔄 **Seamless Video Switching & Queue Browsing:** Swipe down the mini-player on your iPhone to search and select new videos freely without losing connection or resetting the queue, powered by a 0ms non-blocking `FastPlaylistRequestHandler` and persistent device identity (`.yt-cast-store.json`).
@@ -57,6 +58,7 @@ Simply double-click **`build-installer.bat`**. It compiles the React frontend, b
 When running in Fullscreen Kiosk mode, the top-right control bar provides quick access to:
 * **TV Code Badge (`TV Code: XXX XXX XXX XXX`):** View your live 12-digit YouTube pairing code at a glance.
 * **QR Remote:** Open the scannable QR code modal for phone remote control.
+* **Standby Mode (`🌙 Standby`):** Manually put the TV to sleep; stops video and displays the ambient clock while keeping Cast listeners active.
 * **Display Selector (`🖥️ Display 1 / 2`):** Choose which connected monitor/TV displays the app. The window moves immediately via Win32 API and saves your monitor preference for future startups.
 * **Volume Indicator (`30%`):** Click to mute/unmute; adjusts in real time from your phone.
 * **Minimize / Exit Fullscreen (`ESC` / `F`):** Switch between windowed and fullscreen view.
@@ -88,6 +90,7 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
 
 ### ✨ Tính Năng Nổi Bật
 
+- 🌙 **Chế Độ Chờ Ambient Thông Minh & Tự Động Kích Hoạt (Smart Standby):** Khi khởi động hoặc khi điện thoại ngắt kết nối, ứng dụng tự động chuyển sang Chế độ chờ (Standby) — dừng phát hoàn toàn video/âm thanh ngầm, giảm tải CPU/GPU về mức tối thiểu. Máy chủ vẫn chạy ngầm liên tục lắng nghe kết nối YouTube từ iPhone/Android (qua DIAL/SSDP và Lounge), và tự động đánh thức màn hình TV phát toàn màn hình ngay khi có kết nối hoặc lệnh phát video từ điện thoại! Màn hình chờ hiển thị đồng hồ số lớn, ngày tháng, mã TV 12 số và mã QR remote cực đẹp.
 - 📡 **Cast trực tiếp từ app YouTube (iOS & Android):** Tự động tìm thấy qua Wi-Fi bằng chuẩn DIAL/SSDP với tên thiết bị động **`Youtube TV (<Tên-máy-tính>)`** (dễ dàng phân biệt khi cài trên nhiều máy tính trong cùng mạng), hoặc liên kết qua mã TV 12 số.
 - ⏱️ **Đồng Bộ Thời Gian Thực 1:1 (Duration & Seek Sync):** Cầu nối hai chiều với YouTube IFrame Player (`infoDelivery` + `player_sync`) đồng bộ chính xác tổng thời lượng thật và giây đang phát của từng video lên thanh trượt iPhone — tua `+10s/-10s` hoặc kéo thanh thời gian tới bất kỳ đâu đều mượt mà, không bao giờ bị nhảy về `0s`.
 - 🔄 **Chuyển Video & Vuốt Tìm Kiếm Không Ngắt Kết Nối:** Thoải mái vuốt thu nhỏ video trên iPhone để tìm kiếm và chọn phát video mới mà không bị văng kết nối nhờ bộ xử lý hàng đợi tức thì `FastPlaylistRequestHandler` (0ms) và cơ chế lưu định danh TV cố định (`.yt-cast-store.json`).
@@ -127,6 +130,7 @@ Chỉ cần nhấp đúp file **`build-installer.bat`**, hệ thống sẽ tự 
 Khi đang ở chế độ Toàn màn hình, góc phải phía trên màn hình cung cấp đầy đủ các nút điều khiển nhanh:
 * **Mã TV (`MÃ TV: XXX XXX XXX XXX`):** Hiển thị trực tiếp mã liên kết YouTube 12 số kế bên nút QR.
 * **QR Remote:** Phóng to mã QR để quét bằng Camera iPhone.
+* **Chế độ chờ (`🌙 Chế độ chờ`):** Chuyển TV sang chế độ chờ thủ công; dừng video và hiển thị đồng hồ ambient trong khi vẫn lắng nghe kết nối Cast.
 * **Chọn Màn Hình (`🖥️ Màn hình 1 / 2`):** Chuyển ngay cửa sổ TV sang màn hình phụ/TV và tự động lưu lại cho những lần mở máy sau.
 * **Âm lượng (`30%`):** Bấm để bật/tắt tiếng nhanh; đồng bộ trực tiếp khi chỉnh từ iPhone.
 * **Thu nhỏ (`ESC` / `F`):** Thoát chế độ toàn màn hình về giao diện quản lý.
