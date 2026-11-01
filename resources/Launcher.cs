@@ -87,6 +87,46 @@ namespace YouTubeTVReceiver
             }
             catch { }
 
+            // 3.5 Check if Kiosk browser is already running (Single-Instance Protection)
+            if (serverRunning)
+            {
+                bool kioskAlreadyRunning = false;
+                try
+                {
+                    HttpWebRequest kReq = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:8547/api/is-kiosk-running");
+                    kReq.Timeout = 1200;
+                    using (HttpWebResponse kRes = (HttpWebResponse)kReq.GetResponse())
+                    using (StreamReader reader = new StreamReader(kRes.GetResponseStream()))
+                    {
+                        string resp = reader.ReadToEnd();
+                        if (resp.Contains("\"running\":true"))
+                        {
+                            kioskAlreadyRunning = true;
+                        }
+                    }
+                }
+                catch { }
+
+                if (kioskAlreadyRunning)
+                {
+                    // Cửa sổ đã mở trước đó -> Đánh thức và khôi phục hiển thị, KHÔNG mở thêm cửa sổ mới!
+                    try
+                    {
+                        HttpWebRequest wakeReq = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:8547/api/standby");
+                        wakeReq.Method = "POST";
+                        wakeReq.ContentType = "application/json";
+                        wakeReq.Timeout = 1200;
+                        using (StreamWriter sw = new StreamWriter(wakeReq.GetRequestStream()))
+                        {
+                            sw.Write("{\"standby\":false}");
+                        }
+                        using (wakeReq.GetResponse()) { }
+                    }
+                    catch { }
+                    return;
+                }
+            }
+
             // 4. Find Chrome or Edge
             string browserPath = FindBrowser();
             if (string.IsNullOrEmpty(browserPath))

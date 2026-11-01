@@ -34,6 +34,15 @@ if %errorlevel% neq 0 (
 )
 echo [OK] May chu da san sang!
 
+set "KIOSK_RUNNING="
+for /f "delims=" %%i in ('curl -s http://localhost:8547/api/is-kiosk-running') do set "KIOSK_RUNNING=%%i"
+echo %KIOSK_RUNNING% | findstr /i "true" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [OK] Cua so YouTube TV da dang chay! Dang danh thuc va khoi phuc cua so...
+    curl -s -X POST http://localhost:8547/api/standby -H "Content-Type: application/json" -d "{\"standby\":false}" >nul 2>&1
+    goto SUCCESS
+)
+
 echo [3/3] Dang mo TV o che do Toan man hinh va Tu dong phat...
 
 set "CHROME_PATH="

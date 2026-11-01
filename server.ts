@@ -135,6 +135,14 @@ public class Win32TvMinimizer {
 }
 "@
 
+$kioskProcs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' -and $_.CommandLine -like '*--kiosk*' })
+# Đóng tất cả các cửa sổ Kiosk bị mở thừa/trùng, chỉ giữ lại duy nhất 1 cửa sổ chính
+if ($kioskProcs.Count -gt 1) {
+  for ($i = 1; $i -lt $kioskProcs.Count; $i++) {
+    Stop-Process -Id $kioskProcs[$i].ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
 $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' }
 foreach ($p in $procs) {
   try {
@@ -165,7 +173,17 @@ async function enterStandbyMode(reason: string = 'Thao tác thủ công') {
   await minimizeKioskWindow();
 }
 
+let disconnectStandbyTimer: NodeJS.Timeout | null = null;
+
+function cancelDisconnectTimer() {
+  if (disconnectStandbyTimer) {
+    clearTimeout(disconnectStandbyTimer);
+    disconnectStandbyTimer = null;
+  }
+}
+
 async function exitStandbyMode(reason: string = 'Đánh thức / Bắt đầu phát') {
+  cancelDisconnectTimer();
   console.log(`[YouTube Cast Standby] Thoát Chế độ chờ -> Hiện ứng dụng [Lý do: ${reason}].`);
   isStandby = false;
   broadcastStandbyState(false);
@@ -299,6 +317,7 @@ class FastPlaylistRequestHandler {
 // ==========================================
 class WebCastPlayer extends Player {
   protected async doPlay(video: any, position: number): Promise<boolean> {
+    cancelDisconnectTimer();
     const startSec = Math.max(0, Math.floor(Number(position) || 0));
     console.log(`[YouTube Cast Received from iPhone] Video ID: ${video.id}, Position: ${startSec}s`);
 
@@ -556,6 +575,14 @@ public class Win32TvMover {
 }
 "@
 
+$kioskProcs = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' -and $_.CommandLine -like '*--kiosk*' })
+# Đóng tất cả các cửa sổ Kiosk bị mở thừa/trùng, chỉ giữ lại duy nhất 1 cửa sổ chính
+if ($kioskProcs.Count -gt 1) {
+  for ($i = 1; $i -lt $kioskProcs.Count; $i++) {
+    Stop-Process -Id $kioskProcs[$i].ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
 $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' }
 foreach ($p in $procs) {
   try {
@@ -579,6 +606,7 @@ foreach ($p in $procs) {
 // 2. Không bao giờ bị xóa danh sách phát (playlistCleared) làm mất mini-player trên iPhone
 const origUpdateByMessage = ytPlayer.queue.updateByMessage.bind(ytPlayer.queue);
 ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
+  cancelDisconnectTimer();
   const p = message?.payload || {};
   console.log(`[Lounge Queue Message] ${message?.name}:`, JSON.stringify(p));
 
@@ -698,6 +726,7 @@ detectDisplays().then(() => getTargetDisplay()).then((target) => {
 }).catch(() => {});
 
 ytReceiver.on('senderConnect', (sender: any) => {
+  cancelDisconnectTimer();
   console.log(`[YouTube Cast] Connected to sender: ${sender?.name || 'iPhone'}`);
   broadcastControl({ action: 'senderConnected', senderName: sender?.name });
 });
@@ -705,8 +734,25 @@ ytReceiver.on('senderConnect', (sender: any) => {
 ytReceiver.on('senderDisconnect', (sender: any, implicit?: boolean) => {
   const senderName = sender?.name || 'Thiết bị';
   console.log(`[YouTube Cast] Sender disconnected: ${senderName} (implicit: ${implicit})`);
-  // KHÔNG tự động chuyển sang standby khi sender ngắt kết nối
-  // để tránh việc chuyển video hoặc đổi tab trên điện thoại làm ngắt quãng trải nghiệm của người dùng
+
+  // Bỏ qua các lần ngắt kết nối ngầm (implicit) khi đổi bài hoặc đổi tab
+  if (implicit) {
+    console.log('[YouTube Cast] Bỏ qua implicit disconnect khi đang chuyển video/mạng.');
+    return;
+  }
+
+  cancelDisconnectTimer();
+
+  // Chờ 2.5s:
+  // - Nếu người dùng chỉ đang đổi video, khi video mới tới sẽ cancel timer ngay
+  // - Nếu người dùng thực sự bấm "Ngắt kết nối" (Disconnect) trên app YouTube, sau 2.5s TV sẽ tự động thu nhỏ và ẩn xuống Taskbar!
+  disconnectStandbyTimer = setTimeout(async () => {
+    const remainingSenders = ytReceiver.getConnectedSenders ? ytReceiver.getConnectedSenders() : [];
+    if (!remainingSenders || remainingSenders.length === 0) {
+      console.log(`[YouTube Cast] Người dùng đã bấm "Ngắt kết nối" trên app YouTube điện thoại -> Tự động ẩn cửa sổ TV xuống Taskbar.`);
+      await enterStandbyMode(`Bấm "Ngắt kết nối" từ app YouTube (${senderName})`);
+    }
+  }, 2500);
 });
 
 // WebSocket connection for the TV screen and iPhone Remote
@@ -1005,6 +1051,20 @@ app.get('/api/display-flags', async (req, res) => {
   const target = await getTargetDisplay();
   updateChromeProfilePlacement(target);
   res.type('text/plain').send(`--window-position=${target.x},${target.y} --window-size=${target.width},${target.height}`);
+});
+
+// Kiểm tra xem cửa sổ Kiosk Chrome/Edge đã đang mở hay chưa (tránh mở nhiều cửa sổ trùng lặp)
+app.get('/api/is-kiosk-running', async (req, res) => {
+  if (process.platform !== 'win32') {
+    return res.json({ running: connectedClients.size > 0 });
+  }
+  const ps = `
+$p = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' })
+if ($p.Count -gt 0) { Write-Output 'true' } else { Write-Output 'false' }
+`;
+  const out = await runPowerShellEncoded(ps);
+  const running = out.includes('true') || connectedClients.size > 0;
+  return res.json({ running });
 });
 
 // Chọn và lưu màn hình hiển thị TV (chuyển cửa sổ ngay lập tức & lưu cho lần khởi động sau)
