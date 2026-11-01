@@ -101,6 +101,7 @@ let currentSeekableEndTime = 0;
 let positionLastUpdated = Date.now();
 let isVideoPlaying = false;
 let lastSeekTimestamp = 0; // Chống nhảy ngược về live-head / 0s khi đang tua
+let lastVideoLoadTimestamp = 0; // Mốc thời gian bắt đầu nạp video mới để chống sự kiện ended ảo lúc chuyển bài
 let lastExternalNotifyTime = 0;
 let lastDurationNotifyTime = 0;
 let preferredQuality = 'hd1080'; // Độ phân giải ưu tiên mặc định (hd2160, hd1440, hd1080, hd720, large, medium, auto)
@@ -400,6 +401,7 @@ function broadcastVideo(videoData: typeof currentVideo) {
   isStandby = false;
   currentVideo = videoData;
   isVideoPlaying = videoData.isPlaying;
+  lastVideoLoadTimestamp = Date.now();
   const message = JSON.stringify({
     type: 'cast_video',
     video: currentVideo,
@@ -1105,10 +1107,8 @@ ytPlayer.queue.updateByMessage = async (message: any, client: any) => {
         exitStandbyMode('Nhận video mới từ setPlaylist');
       }
       p.videoId = resolvedVideoId;
-      if (!p.videoIds) {
+      if (!p.videoIds || !videoIdsList.includes(resolvedVideoId)) {
         p.videoIds = resolvedVideoId;
-      } else if (!videoIdsList.includes(resolvedVideoId)) {
-        p.videoIds = [resolvedVideoId, ...videoIdsList].join(',');
       }
       if (!p.listId) {
         p.listId = ytPlayer.queue.id || `PPSV_${resolvedVideoId}`;
@@ -1299,22 +1299,33 @@ wss.on('connection', (ws: WebSocket) => {
 
         // Đồng bộ trạng thái Đang phát / Tạm dừng / Kết thúc từ trình phát YouTube
         if (typeof data.playerState === 'number') {
-          if (data.playerState === 1 && !isVideoPlaying) {
+          if (data.playerState === 1) {
             cancelAutoStandby();
-            isVideoPlaying = true;
-            positionLastUpdated = Date.now();
-            shouldNotifyLounge = true;
+            if (!isVideoPlaying) {
+              isVideoPlaying = true;
+              positionLastUpdated = Date.now();
+              shouldNotifyLounge = true;
+            }
           } else if (data.playerState === 2 && isVideoPlaying && Date.now() - lastSeekTimestamp > 2500) {
             isVideoPlaying = false;
             shouldNotifyLounge = true;
           } else if (data.playerState === 0) {
-            // Video kết thúc: Kiểm tra nếu có bài tiếp theo trong hàng đợi thì phát, nếu không thì tự động ẩn TV sau 4 giây
-            if (ytPlayer.queue.videoIds.length > 1 && ytPlayer.queue.current?.id !== ytPlayer.queue.videoIds[ytPlayer.queue.videoIds.length - 1]) {
-              ytPlayer.next().catch(() => {});
-            } else {
-              console.log('[Player Sync] Video đã kết thúc và không còn bài tiếp theo trong hàng đợi. Sẽ tự động ẩn TV sau 4s...');
-              scheduleAutoStandby('Hết video và không có bài tiếp theo', 4000);
+            // Video kết thúc: Chỉ xử lý khi video đã phát ổn định (> 2.5s từ lúc nạp bài)
+            if (!isStandby && Date.now() - lastVideoLoadTimestamp > 2500) {
+              isVideoPlaying = false;
+              currentVideo.isPlaying = false;
+              const queueIds = ytPlayer.queue.videoIds || [];
+              const curIdx = queueIds.indexOf(currentVideo.videoId);
+              const hasNextInQueue = queueIds.length > 1 && curIdx >= 0 && curIdx < queueIds.length - 1;
+              if (hasNextInQueue) {
+                console.log(`[Player Sync] Video (${currentVideo.videoId}) kết thúc -> Tự động phát bài tiếp theo trong hàng đợi...`);
+                ytPlayer.next().catch(() => {});
+              } else if (!autoStandbyTimer) {
+                console.log(`[Player Sync] Video (${currentVideo.videoId}) đã kết thúc và không còn bài tiếp theo. Tự động về Chế độ chờ sau 1s...`);
+                scheduleAutoStandby('Hết video và không có bài tiếp theo', 1000);
+              }
             }
+            return;
           }
         }
 
@@ -1330,6 +1341,26 @@ wss.on('connection', (ws: WebSocket) => {
               await ytPlayer.notifyExternalStateChange(Constants.PLAYER_STATUSES.LOADING).catch(() => {});
             }
             await ytPlayer.notifyExternalStateChange(targetStatus).catch(() => {});
+          }
+        }
+        return;
+      }
+
+      if (data.type === 'video_ended') {
+        if (!isStandby && Date.now() - lastVideoLoadTimestamp > 2500) {
+          if (!data.videoId || data.videoId === currentVideo.videoId) {
+            isVideoPlaying = false;
+            currentVideo.isPlaying = false;
+            const queueIds = ytPlayer.queue.videoIds || [];
+            const curIdx = queueIds.indexOf(currentVideo.videoId);
+            const hasNextInQueue = queueIds.length > 1 && curIdx >= 0 && curIdx < queueIds.length - 1;
+            if (hasNextInQueue) {
+              console.log(`[Video Ended] Video (${currentVideo.videoId}) kết thúc -> Tự động phát bài tiếp theo trong hàng đợi...`);
+              ytPlayer.next().catch(() => {});
+            } else if (!autoStandbyTimer) {
+              console.log(`[Video Ended] Video (${currentVideo.videoId}) đã kết thúc -> Tự động về Chế độ chờ sau 1s...`);
+              scheduleAutoStandby('Hết video và không có bài tiếp theo', 1000);
+            }
           }
         }
         return;

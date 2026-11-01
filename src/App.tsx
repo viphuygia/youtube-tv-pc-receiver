@@ -290,6 +290,10 @@ export default function App() {
                 if (info.playerState === 1) {
                   applyQualityToIframe(preferredQualityRef.current);
                   applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
+                } else if (info.playerState === 0 && !isStandbyRef.current && currentVideoIdRef.current) {
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'video_ended', videoId: currentVideoIdRef.current }));
+                  }
                 }
               }
               playerStateRef.current = info.playerState;
@@ -300,13 +304,17 @@ export default function App() {
               if (info === 1) {
                 applyQualityToIframe(preferredQualityRef.current);
                 applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
+              } else if (info === 0 && !isStandbyRef.current && currentVideoIdRef.current) {
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({ type: 'video_ended', videoId: currentVideoIdRef.current }));
+                }
               }
             }
             playerStateRef.current = info;
           }
 
           const now = Date.now();
-          if (forceImmediateSync || now - lastSyncSentRef.current >= 500) {
+          if (!isStandbyRef.current && currentVideoIdRef.current && (forceImmediateSync || now - lastSyncSentRef.current >= 500)) {
             lastSyncSentRef.current = now;
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(
@@ -639,6 +647,7 @@ export default function App() {
                 playerDurationRef.current = 0;
                 playerSeekableStartRef.current = 0;
                 playerSeekableEndRef.current = 0;
+                playerStateRef.current = -1;
                 activateYouTubeBridge();
                 if (startSec > 0) {
                   sendIframeCommand('loadVideoById', [incomingVid, startSec]);
@@ -880,11 +889,13 @@ export default function App() {
   // Unified video cast helper: updates local screen AND syncs to server so iPhone Remote updates
   const castVideoOnScreen = (videoId: string, title?: string, source: string = 'Màn hình PC') => {
     setIsStandby(false);
+    isStandbyRef.current = false;
     currentVideoIdRef.current = videoId;
     playerTimeRef.current = 0;
     playerDurationRef.current = 0;
     playerSeekableStartRef.current = 0;
     playerSeekableEndRef.current = 0;
+    playerStateRef.current = -1;
 
     setVideo({
       videoId,
