@@ -64,7 +64,7 @@ if %errorlevel% equ 0 (
     echo ========================================================
     echo   DONG GOI THANH CONG
     echo   File cai dat nam tai:
-    echo   dist-installer\YouTube-TV-Receiver-Setup-v1.3.0.exe
+    echo   dist-installer\YouTube-TV-Receiver-Setup-v1.4.0.exe
     echo ========================================================
 ) else (
     echo [LOI] Bien dich bo cai dat that bai

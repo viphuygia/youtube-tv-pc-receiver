@@ -1,6 +1,6 @@
 # 📺 YouTube TV Receiver for Windows (PC Leanback Cast)
 
-[![Version](https://img.shields.io/badge/Version-v1.3.0-red.svg)](https://github.com/viphuygia/youtube-tv-pc-receiver/releases)
+[![Version](https://img.shields.io/badge/Version-v1.4.0-red.svg)](https://github.com/viphuygia/youtube-tv-pc-receiver/releases)
 [![Node.js Version](https://img.shields.io/badge/Node.js-v18%2B-green.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -15,8 +15,11 @@
 
 Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Receiver**. Cast videos directly from the **official YouTube app on iPhone or Android** over local Wi-Fi (DIAL/SSDP protocol) or link using official 12-digit Google TV Codes. Engineered for a true zero-mouse living room TV experience with 1:1 timeline synchronization, multi-monitor memory, single-instance protection, and instant Phone-to-PC Standby controls.
 
-### 🌟 What's New in v1.3.0
+### 🌟 What's New in v1.4.0
 
+- 👻 **100% Hidden Terminal / Zero-Console Launch (`YouTubeTV.exe` & `start.bat`):**
+  - Replaced visible CMD/PowerShell terminal windows with a silent native Windows GUI launcher (`YouTubeTV.exe`, `/target:winexe`) and auto-hidden `start.bat` (`WindowStyle Hidden`), so no black terminal window ever appears or covers your screen.
+  - Added `windowsHide: true` to all background helper spawns (`TvWindowManager.exe`, PowerShell, and Kiosk browser processes) for zero console flash during Standby / Wake transitions.
 - ⏩ **Rock-Solid Video Seeking & Instant `+10s / -10s` Skip:**
   - Eliminated fake `LOADING` state transitions during `Player.seek()`, sending direct `onStateChange(PLAYING)` updates to the phone so consecutive `+10s` double-taps and seek-bar scrubbing never stutter or reset.
   - Fixed initial duration synchronization (`lastNotifiedDuration`) so real video duration is always delivered to the phone immediately without being blocked by seek guards.
@@ -77,7 +80,7 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 #### Option 1: Standalone Windows Installer (Recommended for End-Users)
 > [!TIP]
 > **No Node.js or command line required!** The installer bundles an embedded portable Node.js runtime and native launcher.
-1. Download **`YouTube-TV-Receiver-Setup-v1.3.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) section.
+1. Download **`YouTube-TV-Receiver-Setup-v1.4.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) section.
 2. Run the installer and click **Next > Install**.
 3. Choose whether to create a Desktop icon and whether to **Auto-start on Windows boot**.
 4. Double-click the **YouTube TV Receiver** Desktop icon anytime to launch directly into Fullscreen Kiosk mode!
@@ -88,12 +91,12 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
    git clone https://github.com/viphuygia/youtube-tv-pc-receiver.git
    cd youtube-tv-pc-receiver
    ```
-2. **Launch:** Double-click on **`start.bat`**.
+2. **Launch:** Double-click on **`start.bat`** or **`YouTubeTV.exe`**.
    * Requires Node.js v18+.
-   * Automatically installs dependencies on first run and opens in Kiosk mode.
+   * Automatically installs dependencies on first run and opens in Kiosk mode with zero terminal window.
 
 #### 📦 Building the Installer Yourself:
-Simply double-click **`build-installer.bat`**. It compiles the React frontend, bundles the backend, builds the C# native launcher, and generates `dist-installer\YouTube-TV-Receiver-Setup-v1.3.0.exe` using Inno Setup.
+Simply double-click **`build-installer.bat`**. It compiles the React frontend, bundles the backend, builds the C# native launcher, and generates `dist-installer\YouTube-TV-Receiver-Setup-v1.4.0.exe` using Inno Setup.
 
 ---
 
@@ -150,8 +153,11 @@ When running in Fullscreen Kiosk mode, the top-right control bar provides quick 
 
 Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu sóng YouTube** chuyên nghiệp không cần dùng chuột. Truyền video (Cast) trực tiếp từ ứng dụng **YouTube trên iPhone / Android** sang máy tính qua mạng Wi-Fi hoặc mã liên kết TV 12 chữ số chính thức. Đồng bộ chuẩn xác 1:1 thanh thời gian thực của từng video, hỗ trợ chọn và ghi nhớ màn hình phụ/TV, tính năng Chế độ ẩn TV giải phóng màn hình PC cùng bộ kích hoạt phím tắt linh hoạt từ điện thoại.
 
-### 🌟 Tính Năng Mới Trên Phiên Bản v1.3.0
+### 🌟 Tính Năng Mới Trên Phiên Bản v1.4.0
 
+- 👻 **Ẩn Hoàn Toàn Cửa Sổ Terminal / CMD Khi Chạy App (`YouTubeTV.exe` & `start.bat`):**
+  - Tích hợp trình khởi chạy Native GUI (`YouTubeTV.exe`, `/target:winexe`) ngay tại thư mục gốc và tự động đóng/ẩn cửa sổ `start.bat` (`WindowStyle Hidden`), giúp mở TV êm ru mà không bao giờ hiện cửa sổ CMD đen đè lên màn hình.
+  - Gắn cờ `windowsHide: true` cho toàn bộ tiến trình nền (`TvWindowManager.exe`, PowerShell, trình duyệt Kiosk) để không nháy cửa sổ dòng lệnh khi ẩn/hiện TV.
 - ⏩ **Tua Video & Nhảy Nhanh `+10s / -10s` Siêu Mượt & Ổn Định Tuyệt Đối:**
   - Loại bỏ trạng thái `LOADING` giả lập khi tua (`Player.seek()`), gửi trực tiếp phản hồi `onStateChange(PLAYING)` về điện thoại giúp thao tác bấm đúp `+10s` liên tiếp hoặc kéo thanh trượt mượt mà 100%, không bị giật lùi hay mất bộ đếm.
   - Khắc phục triệt để đồng bộ thời lượng thực (`lastNotifiedDuration`) ngay khi mở video, không bị chặn bởi bộ khóa tua.
@@ -212,21 +218,21 @@ Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu s�
 #### Cách 1: Tải bộ cài đặt 1-Click (Khuyên dùng cho người dùng cuối)
 > [!TIP]
 > **Không cần cài đặt Node.js hay mở dòng lệnh!** Bộ cài đặt đã nhúng sẵn Node.js portable và launcher native siêu nhẹ.
-1. Tải file **`YouTube-TV-Receiver-Setup-v1.3.0.exe`** từ mục [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases).
+1. Tải file **`YouTube-TV-Receiver-Setup-v1.4.0.exe`** từ mục [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases).
 2. Chạy file cài đặt, bấm **Next ➔ Install**.
 3. Bạn có thể tick chọn **Tạo biểu tượng ngoài Desktop** và **Khởi động cùng Windows khi bật máy**.
 4. Nhấp đúp vào icon **YouTube TV Receiver** ngoài Desktop để mở TV xem ngay!
 
-#### Cách 2: Chạy trực tiếp từ mã nguồn (`start.bat`)
+#### Cách 2: Chạy trực tiếp từ mã nguồn (`start.bat` hoặc `YouTubeTV.exe`)
 1. **Tải mã nguồn về máy:**
    ```bash
    git clone https://github.com/viphuygia/youtube-tv-pc-receiver.git
    cd youtube-tv-pc-receiver
    ```
-2. **Khởi chạy ứng dụng:** Nhấp đúp chuột vào file **`start.bat`** (yêu cầu máy có sẵn Node.js v18+).
+2. **Khởi chạy ứng dụng:** Nhấp đúp chuột vào file **`YouTubeTV.exe`** hoặc **`start.bat`** (yêu cầu máy có sẵn Node.js v18+).
 
 #### 📦 Tự đóng gói file cài đặt Setup.exe:
-Chỉ cần nhấp đúp file **`build-installer.bat`**, hệ thống sẽ tự build frontend, bundle server và tạo ra file cài đặt `dist-installer\YouTube-TV-Receiver-Setup-v1.3.0.exe` thông qua Inno Setup.
+Chỉ cần nhấp đúp file **`build-installer.bat`**, hệ thống sẽ tự build frontend, bundle server và tạo ra file cài đặt `dist-installer\YouTube-TV-Receiver-Setup-v1.4.0.exe` thông qua Inno Setup.
 
 ---
 
