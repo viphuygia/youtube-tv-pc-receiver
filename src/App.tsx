@@ -121,6 +121,10 @@ export default function App() {
   const subtitlesEnabledRef = useRef<boolean>(subtitlesEnabled);
   const subtitlesLangRef = useRef<string>(subtitlesLang);
   const appliedVideoSettingsForIdRef = useRef<string>('');
+  const iframeLoadedVideoIdRef = useRef<string>('');
+  const videoLoadTimestampRef = useRef<number>(0);
+  const expectedStartSecRef = useRef<number>(0);
+  const [isResyncing, setIsResyncing] = useState<boolean>(false);
 
   useEffect(() => {
     preferredQualityRef.current = preferredQuality;
@@ -250,36 +254,79 @@ export default function App() {
           let forceImmediateSync = false;
 
           if (info && typeof info === 'object') {
+            if (info.videoData && typeof info.videoData.video_id === 'string' && info.videoData.video_id) {
+              iframeLoadedVideoIdRef.current = info.videoData.video_id;
+            }
+
+            // Chặn triệt để các gói tin infoDelivery tồn đọng của video cũ trong lúc đang chuyển sang video mới
+            if (
+              currentVideoIdRef.current &&
+              iframeLoadedVideoIdRef.current &&
+              iframeLoadedVideoIdRef.current !== currentVideoIdRef.current
+            ) {
+              // Nếu sau 900ms mà IFrame vẫn kẹt ở video cũ (do cửa sổ vừa đánh thức từ Standby), ép nạp lại video mới
+              if (!isStandbyRef.current && Date.now() - videoLoadTimestampRef.current > 900) {
+                videoLoadTimestampRef.current = Date.now();
+                const startAt = expectedStartSecRef.current || 0;
+                if (startAt > 0) {
+                  sendIframeCommand('loadVideoById', [currentVideoIdRef.current, startAt]);
+                } else {
+                  sendIframeCommand('loadVideoById', [currentVideoIdRef.current]);
+                }
+                sendIframeCommand('playVideo', []);
+              }
+              return;
+            }
+
+            // Trong 600ms đầu tiên khi vừa gửi loadVideoById, nếu IFrame chưa xác nhận videoData.video_id mới thì bỏ qua telemetry cũ
+            if (
+              currentVideoIdRef.current &&
+              !iframeLoadedVideoIdRef.current &&
+              Date.now() - videoLoadTimestampRef.current < 600
+            ) {
+              return;
+            }
+
             if (typeof info.playbackQuality === 'string' && info.playbackQuality && info.playbackQuality !== 'unknown') {
               setActiveQuality(info.playbackQuality);
             }
 
             if (info.progressState && typeof info.progressState === 'object') {
-              if (typeof info.progressState.seekableStart === 'number' && !isNaN(info.progressState.seekableStart)) {
-                playerSeekableStartRef.current = info.progressState.seekableStart;
-              }
+              playerSeekableStartRef.current = 0;
               if (typeof info.progressState.seekableEnd === 'number' && info.progressState.seekableEnd > 0) {
-                playerSeekableEndRef.current = Math.max(playerSeekableEndRef.current, info.progressState.seekableEnd);
+                playerSeekableEndRef.current = info.progressState.seekableEnd;
               }
             }
 
             // Bỏ qua cập nhật currentTime cũ trong 1.2s đầu sau khi người dùng bấm tua để tránh giật ngược
             if (typeof info.currentTime === 'number' && !isNaN(info.currentTime)) {
-              if (Date.now() - lastClientSeekRef.current > 1200) {
+              // Nếu vừa mở video ở mốc thời gian > 2s (ví dụ xem tiếp từ iPhone) mà IFrame vẫn đang ở 0s lúc nạp bài -> giữ mốc thời gian dự kiến
+              if (
+                expectedStartSecRef.current > 2 &&
+                Date.now() - videoLoadTimestampRef.current < 2200 &&
+                info.currentTime < 2
+              ) {
+                playerTimeRef.current = expectedStartSecRef.current;
+              } else if (Date.now() - lastClientSeekRef.current > 1200) {
                 playerTimeRef.current = info.currentTime;
+                if (expectedStartSecRef.current > 0 && Math.abs(info.currentTime - expectedStartSecRef.current) <= 5) {
+                  expectedStartSecRef.current = 0;
+                }
               }
             }
 
-            const rawDur = Math.max(
-              typeof info.duration === 'number' && !isNaN(info.duration) && info.duration > 0 ? info.duration : 0,
-              playerSeekableEndRef.current,
-              typeof info.progressState?.duration === 'number' && info.progressState.duration > 0 ? info.progressState.duration : 0
-            );
+            const infoDur = typeof info.duration === 'number' && !isNaN(info.duration) && info.duration > 0 ? info.duration : 0;
+            const progDur = typeof info.progressState?.duration === 'number' && info.progressState.duration > 0 ? info.progressState.duration : 0;
+            const rawDur = infoDur > 0
+              ? Math.max(infoDur, playerSeekableEndRef.current)
+              : Math.max(progDur, playerSeekableEndRef.current);
+
             if (rawDur > 0) {
               if (playerDurationRef.current === 0 || Math.abs(rawDur - playerDurationRef.current) >= 1) {
                 forceImmediateSync = true;
               }
-              playerDurationRef.current = playerSeekableStartRef.current > 0 ? Math.max(playerDurationRef.current, rawDur) : rawDur;
+              playerDurationRef.current = rawDur;
+              playerSeekableEndRef.current = rawDur;
             }
 
             if (typeof info.playerState === 'number') {
@@ -290,6 +337,16 @@ export default function App() {
                   appliedVideoSettingsForIdRef.current = currentVideoIdRef.current;
                   applyQualityToIframe(preferredQualityRef.current);
                   applySubtitlesToIframe(subtitlesEnabledRef.current, subtitlesLangRef.current);
+                  // Đảm bảo nếu iPhone yêu cầu bắt đầu ở mốc startSec > 2s mà IFrame bị khởi chạy ở 0s thì tự tua đúng tới startSec
+                  if (expectedStartSecRef.current > 2 && Math.abs((info.currentTime ?? 0) - expectedStartSecRef.current) > 4) {
+                    const targetStart = expectedStartSecRef.current;
+                    expectedStartSecRef.current = 0;
+                    playerTimeRef.current = targetStart;
+                    lastClientSeekRef.current = Date.now();
+                    sendIframeCommand('seekTo', [targetStart, true]);
+                  } else {
+                    expectedStartSecRef.current = 0;
+                  }
                 } else if (info.playerState === 0 && !isStandbyRef.current && currentVideoIdRef.current) {
                   if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                     wsRef.current.send(JSON.stringify({ type: 'video_ended', videoId: currentVideoIdRef.current }));
@@ -322,10 +379,11 @@ export default function App() {
                 JSON.stringify({
                   type: 'player_sync',
                   videoId: currentVideoIdRef.current,
+                  verifiedVideoId: iframeLoadedVideoIdRef.current || currentVideoIdRef.current,
                   position: playerTimeRef.current,
                   duration: playerDurationRef.current,
-                  seekableStart: playerSeekableStartRef.current,
-                  seekableEnd: Math.max(playerSeekableEndRef.current, playerDurationRef.current),
+                  seekableStart: 0,
+                  seekableEnd: playerDurationRef.current,
                   playerState: playerStateRef.current
                 })
               );
@@ -641,7 +699,12 @@ export default function App() {
                 const startSec = Number(data.video.startSeconds) || 0;
                 isStandbyRef.current = false;
                 setIsStandby(false);
+                if (incomingVid !== currentVideoIdRef.current) {
+                  iframeLoadedVideoIdRef.current = '';
+                }
                 currentVideoIdRef.current = incomingVid;
+                videoLoadTimestampRef.current = Date.now();
+                expectedStartSecRef.current = startSec;
                 setVideo(data.video);
 
                 playerTimeRef.current = startSec;
@@ -751,6 +814,23 @@ export default function App() {
                 setSubtitlesLang(nextLang);
                 subtitlesLangRef.current = nextLang;
                 applySubtitlesToIframe(nextEnabled, nextLang);
+              } else if (data.action === 'requestSync') {
+                activateYouTubeBridge();
+                if (!isStandbyRef.current && currentVideoIdRef.current && playerDurationRef.current > 0 && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(
+                    JSON.stringify({
+                      type: 'player_sync',
+                      videoId: currentVideoIdRef.current,
+                      verifiedVideoId: iframeLoadedVideoIdRef.current || currentVideoIdRef.current,
+                      position: playerTimeRef.current,
+                      duration: playerDurationRef.current,
+                      seekableStart: 0,
+                      seekableEnd: playerDurationRef.current,
+                      playerState: playerStateRef.current,
+                      forceResync: true
+                    })
+                  );
+                }
               } else if (data.action === 'toggleFullscreen') {
                 toggleFullscreen();
               } else if (data.action === 'displayChanged' && data.selectedDisplay) {
@@ -908,11 +988,41 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [sendIframeCommand, applySubtitlesToIframe]);
 
+  // Đồng bộ lại thời gian thực (Timeline Resync) 1 chạm giữa PC và iPhone
+  const handleManualResync = async () => {
+    setIsResyncing(true);
+    activateYouTubeBridge();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && currentVideoIdRef.current) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'player_sync',
+          videoId: currentVideoIdRef.current,
+          verifiedVideoId: iframeLoadedVideoIdRef.current || currentVideoIdRef.current,
+          position: playerTimeRef.current,
+          duration: playerDurationRef.current,
+          seekableStart: 0,
+          seekableEnd: playerDurationRef.current,
+          playerState: playerStateRef.current,
+          forceResync: true
+        })
+      );
+    }
+    try {
+      await fetch('/api/resync', { method: 'POST' });
+    } catch {}
+    setTimeout(() => setIsResyncing(false), 600);
+  };
+
   // Unified video cast helper: updates local screen AND syncs to server so iPhone Remote updates
   const castVideoOnScreen = (videoId: string, title?: string, source: string = 'Màn hình PC') => {
     setIsStandby(false);
     isStandbyRef.current = false;
+    if (videoId !== currentVideoIdRef.current) {
+      iframeLoadedVideoIdRef.current = '';
+    }
     currentVideoIdRef.current = videoId;
+    videoLoadTimestampRef.current = Date.now();
+    expectedStartSecRef.current = 0;
     playerTimeRef.current = 0;
     playerDurationRef.current = 0;
     playerSeekableStartRef.current = 0;
@@ -1444,6 +1554,18 @@ export default function App() {
                   <span className="font-mono font-black text-[11px] px-1 rounded bg-white/10">CC</span>
                   <span className="font-semibold hidden sm:inline">
                     {subtitlesEnabled ? subtitlesLang.toUpperCase() : (lang === 'vi' ? 'Tắt' : 'OFF')}
+                  </span>
+                </button>
+
+                {/* Nút Đồng bộ lại thời gian (Sync Time) với iPhone */}
+                <button
+                  onClick={handleManualResync}
+                  className="px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black text-white backdrop-blur-md border border-white/20 transition-all flex items-center gap-1.5 text-xs shadow-lg hover:border-emerald-400/60"
+                  title={lang === 'vi' ? 'Đồng bộ lại thời gian thực giữa TV và iPhone' : 'Resync playback timeline with iPhone'}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isResyncing ? 'animate-spin' : ''}`} />
+                  <span className="font-semibold hidden sm:inline">
+                    {lang === 'vi' ? 'Sync' : 'Sync'}
                   </span>
                 </button>
 

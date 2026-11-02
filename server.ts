@@ -105,12 +105,60 @@ let lastVideoLoadTimestamp = 0; // Mốc thời gian bắt đầu nạp video m�
 let lastExternalNotifyTime = 0;
 let lastDurationNotifyTime = 0;
 let lastNotifiedDuration = 0;
+let lastLoungeSyncPosition = 0;
+let lastLoungeSyncTime = Date.now();
+let lastLoungeSyncPlaying = false;
+let postLoadResyncTimers: NodeJS.Timeout[] = [];
 let preferredQuality = 'hd1080'; // Độ phân giải ưu tiên mặc định (hd2160, hd1440, hd1080, hd720, large, medium, auto)
 let subtitlesEnabled = false; // Mặc định tắt phụ đề
 let subtitlesLang = 'vi';
 
 // Resolver chờ thời lượng thực từ trình phát khi bắt đầu video mới
 let pendingDurationResolver: ((dur: number) => void) | null = null;
+
+function clearPostLoadResyncTimers() {
+  for (const t of postLoadResyncTimers) {
+    clearTimeout(t);
+  }
+  postLoadResyncTimers = [];
+}
+
+async function forceLoungeTimelineResync(reason: string) {
+  if (isStandby || !currentVideo.videoId || currentVideoDuration <= 0) return;
+  const targetStatus = isVideoPlaying
+    ? Constants.PLAYER_STATUSES.PLAYING
+    : Constants.PLAYER_STATUSES.PAUSED;
+  if (
+    ytPlayer.status === Constants.PLAYER_STATUSES.PLAYING ||
+    ytPlayer.status === Constants.PLAYER_STATUSES.PAUSED ||
+    ytPlayer.status === Constants.PLAYER_STATUSES.LOADING
+  ) {
+    lastExternalNotifyTime = Date.now();
+    lastLoungeSyncPosition = currentPositionSeconds;
+    lastLoungeSyncTime = Date.now();
+    lastLoungeSyncPlaying = isVideoPlaying;
+    console.log(`[Timeline Resync] Đồng bộ chuẩn thời gian lên iPhone (${reason}): pos=${Math.floor(currentPositionSeconds)}s / dur=${currentVideoDuration}s`);
+    await (ytPlayer as any).notifyExternalStateChange(targetStatus, true).catch(() => {});
+  }
+}
+
+function schedulePostLoadResyncs(videoId: string) {
+  clearPostLoadResyncTimers();
+  const delays = [1200, 2600, 4800];
+  for (const ms of delays) {
+    const timer = setTimeout(() => {
+      if (!isStandby && currentVideo.videoId === videoId) {
+        broadcastControl({ action: 'requestSync' });
+        setTimeout(() => {
+          if (!isStandby && currentVideo.videoId === videoId && currentVideoDuration > 0) {
+            forceLoungeTimelineResync(`Post-load ${ms}ms`).catch(() => {});
+          }
+        }, 180);
+      }
+    }, ms);
+    postLoadResyncTimers.push(timer);
+  }
+}
 
 async function broadcastStandbyState(standby: boolean) {
   isStandby = standby;
@@ -541,16 +589,23 @@ class WebCastPlayer extends Player {
 
     currentPositionSeconds = startSec;
     positionLastUpdated = Date.now();
-    lastSeekTimestamp = 0;
+    lastSeekTimestamp = Date.now();
     isVideoPlaying = true;
 
-    // Đặt lại thời lượng khi đổi sang video khác
-    if (currentVideo.videoId !== video.id) {
-      currentVideoDuration = 0;
-      currentSeekableStartTime = 0;
-      currentSeekableEndTime = 0;
-      lastDurationNotifyTime = 0;
-      lastNotifiedDuration = 0;
+    // Luôn đặt lại toàn bộ thời lượng và dải seek khi bắt đầu bất kỳ lượt phát mới nào để không bao giờ dính dữ liệu của video cũ
+    currentVideoDuration = 0;
+    currentSeekableStartTime = 0;
+    currentSeekableEndTime = 0;
+    lastDurationNotifyTime = 0;
+    lastNotifiedDuration = 0;
+    lastLoungeSyncPosition = startSec;
+    lastLoungeSyncTime = Date.now();
+    lastLoungeSyncPlaying = true;
+
+    if (pendingDurationResolver) {
+      const oldResolver = pendingDurationResolver;
+      pendingDurationResolver = null;
+      oldResolver(0);
     }
 
     const initialTitle = video.title || `YouTube Video (${video.id})`;
@@ -567,8 +622,8 @@ class WebCastPlayer extends Player {
       resolveVideoTitleAsync(video.id);
     }
 
-    // Chờ tối đa 800ms để trình phát YouTube trên PC gửi về thời lượng thực (duration) của video
-    // Giúp thanh tua trên iPhone hiển thị đúng ngay lập tức khi bắt đầu phát
+    // Chờ tối đa 1800ms để trình phát YouTube trên PC tải xong video mới và gửi về thời lượng thực (duration > 0)
+    // Nhờ đó bản tin NowPlaying đầu tiên gửi về iPhone luôn có tổng thời lượng chuẩn xác (không bị duration=0 làm văng chấm đỏ về cuối thanh)
     if (currentVideoDuration <= 0 && connectedClients.size > 0) {
       await new Promise<number>((resolve) => {
         pendingDurationResolver = resolve;
@@ -577,9 +632,14 @@ class WebCastPlayer extends Player {
             pendingDurationResolver = null;
             resolve(currentVideoDuration);
           }
-        }, 800);
+        }, 1800);
       });
     }
+
+    lastLoungeSyncPosition = currentPositionSeconds;
+    lastLoungeSyncTime = Date.now();
+    lastLoungeSyncPlaying = isVideoPlaying;
+    schedulePostLoadResyncs(video.id);
 
     return true;
   }
@@ -624,7 +684,12 @@ class WebCastPlayer extends Player {
     currentPositionSeconds = target;
     positionLastUpdated = Date.now();
     lastSeekTimestamp = Date.now();
+    lastLoungeSyncPosition = target;
+    lastLoungeSyncTime = Date.now();
     broadcastControl({ action: 'seekTo', value: target });
+    if (currentVideo.videoId) {
+      schedulePostLoadResyncs(currentVideo.videoId);
+    }
     return true;
   }
 
@@ -666,9 +731,9 @@ class WebCastPlayer extends Player {
   }
 
   async getSeekableRange(): Promise<{ start: number; end: number }> {
-    const effEnd = Math.max(currentSeekableEndTime, currentVideoDuration);
+    const effEnd = Math.max(currentVideoDuration, currentSeekableEndTime);
     return {
-      start: Math.max(0, Math.floor(currentSeekableStartTime)),
+      start: 0,
       end: Math.max(0, Math.round(effEnd))
     };
   }
@@ -1250,39 +1315,42 @@ wss.on('connection', (ws: WebSocket) => {
         if (data.videoId && data.videoId !== currentVideo.videoId) {
           return;
         }
+        // Chặn tuyệt đối dữ liệu tồn đọng từ video cũ nếu YouTube IFrame trên PC chưa kịp chuyển sang video mới
+        if (data.verifiedVideoId && data.verifiedVideoId !== currentVideo.videoId) {
+          return;
+        }
 
-        let shouldNotifyLounge = false;
+        let shouldNotifyLounge = Boolean(data.forceResync);
         let durationChanged = false;
 
-        if (typeof data.seekableStart === 'number' && data.seekableStart >= 0) {
-          currentSeekableStartTime = data.seekableStart;
-        }
-        if (typeof data.seekableEnd === 'number' && data.seekableEnd > 0) {
-          currentSeekableEndTime = Math.max(currentSeekableEndTime, data.seekableEnd);
-        }
+        currentSeekableStartTime = 0;
+        const incomingSeekEnd = typeof data.seekableEnd === 'number' && data.seekableEnd > 0 ? Math.round(data.seekableEnd) : 0;
+        const incomingDur = typeof data.duration === 'number' && data.duration > 0 ? Math.round(data.duration) : 0;
 
         // Cập nhật vị trí giây thực tế (bỏ qua trong 1.2s đầu sau khi người dùng vừa bấm tua để tránh giật ngược)
         if (typeof data.position === 'number' && data.position >= 0) {
-          if (Date.now() - lastSeekTimestamp > 1200) {
-            const prevPos = Math.floor(currentPositionSeconds);
+          if (data.forceResync || Date.now() - lastSeekTimestamp > 1200) {
+            // Tính độ lệch thực tế (drift) giữa đồng hồ dự đoán trên iPhone và giây phát thực trên PC
+            const iphonePredictedPos = lastLoungeSyncPlaying
+              ? lastLoungeSyncPosition + (Date.now() - lastLoungeSyncTime) / 1000
+              : lastLoungeSyncPosition;
+            const drift = Math.abs(data.position - iphonePredictedPos);
+
             currentPositionSeconds = data.position;
             positionLastUpdated = Date.now();
-            if (Math.abs(Math.floor(data.position) - prevPos) >= 2) {
+
+            // Nếu đồng hồ trên iPhone lệch >= 1.5s so với video thực trên PC, hoặc sau mỗi 4s định kỳ -> ép đồng bộ lại ngay
+            if (drift >= 1.5 || Date.now() - lastLoungeSyncTime >= 4000) {
               shouldNotifyLounge = true;
             }
           }
         }
 
-        // Cập nhật thời lượng thực (hoặc đỉnh live-edge đối với video Trực tiếp / Công chiếu)
-        const candidateDur = Math.max(
-          typeof data.duration === 'number' && data.duration > 0 ? data.duration : 0,
-          currentSeekableEndTime
-        );
-        if (candidateDur > 0) {
-          const roundedDur = Math.round(candidateDur);
-          const nextDur = currentSeekableStartTime > 0 ? Math.max(currentVideoDuration, roundedDur) : roundedDur;
+        // Cập nhật thời lượng thực (không dùng Math.max tích lũy qua nhiều bài để tránh kẹt duration của video dài trước đó)
+        const nextDur = Math.max(incomingDur, incomingSeekEnd);
+        if (nextDur > 0) {
           currentVideoDuration = nextDur;
-          currentSeekableEndTime = Math.max(currentSeekableEndTime, nextDur);
+          currentSeekableEndTime = nextDur;
 
           // Thông báo ngay lập tức cho iPhone ở lần đầu có duration thực (lastNotifiedDuration === 0)
           // hoặc khi duration thay đổi >= 1s (video thường) / >= 15s (video Trực tiếp đang tăng từng giây)
@@ -1296,7 +1364,7 @@ wss.on('connection', (ws: WebSocket) => {
             shouldNotifyLounge = true;
             lastNotifiedDuration = nextDur;
             lastDurationNotifyTime = Date.now();
-            console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s`);
+            console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s (pos=${Math.floor(currentPositionSeconds)}s)`);
           }
 
           if (pendingDurationResolver) {
@@ -1331,6 +1399,7 @@ wss.on('connection', (ws: WebSocket) => {
                 ytPlayer.next().catch(() => {});
               } else if (!autoStandbyTimer) {
                 console.log(`[Player Sync] Video (${currentVideo.videoId}) đã kết thúc và không còn bài tiếp theo. Tự động về Chế độ chờ sau 1s...`);
+                ytPlayer.stop().catch(() => {});
                 scheduleAutoStandby('Hết video và không có bài tiếp theo', 1000);
               }
             }
@@ -1338,18 +1407,20 @@ wss.on('connection', (ws: WebSocket) => {
           }
         }
 
-        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác (luôn ưu tiên durationChanged ngay lập tức)
-        if (durationChanged || (Date.now() - lastSeekTimestamp > 1200 && shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 800)) {
+        // Báo cho ứng dụng YouTube trên iPhone cập nhật thanh thời gian & tổng thời lượng chính xác (gửi nguyên khối NowPlaying + OnStateChange, không dùng trạng thái LOADING giả)
+        if (
+          currentVideoDuration > 0 &&
+          (durationChanged || data.forceResync || (Date.now() - lastSeekTimestamp > 1200 && shouldNotifyLounge && Date.now() - lastExternalNotifyTime > 700))
+        ) {
           lastExternalNotifyTime = Date.now();
+          lastLoungeSyncPosition = currentPositionSeconds;
+          lastLoungeSyncTime = Date.now();
+          lastLoungeSyncPlaying = isVideoPlaying;
           const targetStatus = isVideoPlaying
             ? Constants.PLAYER_STATUSES.PLAYING
             : Constants.PLAYER_STATUSES.PAUSED;
           if (ytPlayer.status === Constants.PLAYER_STATUSES.PLAYING || ytPlayer.status === Constants.PLAYER_STATUSES.PAUSED || ytPlayer.status === Constants.PLAYER_STATUSES.LOADING) {
-            if (durationChanged && ytPlayer.status === Constants.PLAYER_STATUSES.PLAYING && targetStatus === Constants.PLAYER_STATUSES.PLAYING) {
-              // Ép YouTubeApp phát bản tin NowPlaying mới kèm duration và seekableEndTime thực cho thanh tua trên iPhone
-              await ytPlayer.notifyExternalStateChange(Constants.PLAYER_STATUSES.LOADING).catch(() => {});
-            }
-            await ytPlayer.notifyExternalStateChange(targetStatus).catch(() => {});
+            await (ytPlayer as any).notifyExternalStateChange(targetStatus, true).catch(() => {});
           }
         }
         return;
@@ -1368,6 +1439,7 @@ wss.on('connection', (ws: WebSocket) => {
               ytPlayer.next().catch(() => {});
             } else if (!autoStandbyTimer) {
               console.log(`[Video Ended] Video (${currentVideo.videoId}) đã kết thúc -> Tự động về Chế độ chờ sau 1s...`);
+              ytPlayer.stop().catch(() => {});
               scheduleAutoStandby('Hết video và không có bài tiếp theo', 1000);
             }
           }
@@ -1409,15 +1481,31 @@ wss.on('connection', (ws: WebSocket) => {
           currentPositionSeconds = target;
           positionLastUpdated = Date.now();
           lastSeekTimestamp = Date.now();
+          lastLoungeSyncPosition = target;
+          lastLoungeSyncTime = Date.now();
           data.action = 'seekTo';
           data.value = target;
-          ytPlayer.notifyExternalStateChange().catch(() => {});
+          (ytPlayer as any).notifyExternalStateChange(undefined, true).catch(() => {});
+          if (currentVideo.videoId) {
+            schedulePostLoadResyncs(currentVideo.videoId);
+          }
         } else if (data.action === 'seekTo' && typeof data.value === 'number') {
           const target = Math.max(0, Math.floor(data.value));
           currentPositionSeconds = target;
           positionLastUpdated = Date.now();
           lastSeekTimestamp = Date.now();
-          ytPlayer.notifyExternalStateChange().catch(() => {});
+          lastLoungeSyncPosition = target;
+          lastLoungeSyncTime = Date.now();
+          (ytPlayer as any).notifyExternalStateChange(undefined, true).catch(() => {});
+          if (currentVideo.videoId) {
+            schedulePostLoadResyncs(currentVideo.videoId);
+          }
+        } else if (data.action === 'resync') {
+          broadcastControl({ action: 'requestSync' });
+          setTimeout(() => {
+            forceLoungeTimelineResync('Manual / Remote Resync').catch(() => {});
+          }, 150);
+          return;
         } else if (data.action === 'setQuality' && typeof data.value === 'string') {
           preferredQuality = data.value;
           persistentStore.set('tv.preferredQuality', preferredQuality).catch(() => {});
@@ -1660,6 +1748,20 @@ app.post('/api/refresh-code', async (req, res) => {
   return res.json({ 
     success: true, 
     pairingCode: formatPairingCode(realPairingCode) 
+  });
+});
+
+// Đồng bộ lại thời gian thực (Timeline Resync) giữa PC IFrame và iPhone YouTube App
+app.post('/api/resync', async (req, res) => {
+  broadcastControl({ action: 'requestSync' });
+  await new Promise(r => setTimeout(r, 200));
+  await forceLoungeTimelineResync('API /api/resync');
+  return res.json({
+    success: true,
+    videoId: currentVideo.videoId,
+    position: Math.floor(currentPositionSeconds),
+    duration: currentVideoDuration,
+    isPlaying: isVideoPlaying
   });
 });
 
