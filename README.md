@@ -4,6 +4,7 @@
 [![Node.js Version](https://img.shields.io/badge/Node.js-v18%2B-green.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Security: Audited](https://img.shields.io/badge/Security-Audited%20%26%20Clean-success.svg)](#-security--privacy-policy)
 [![Bilingual](https://img.shields.io/badge/Languages-English%20%7C%20Ti%E1%BA%BFng%20Vi%E1%BB%87t-purple.svg)](#-tiếng-việt)
 
 > **Language Navigation:** [🇬🇧 English Version](#-english) | [🇻🇳 Phiên Bản Tiếng Việt](#-tiếng-việt)
@@ -17,13 +18,17 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 
 ### 🌟 What's New in v1.4.0
 
+- ⏱️ **Exact Video Duration Resolution & Cross-Video Sync:**
+  - Resolved the bug where long videos (> 3 to 4 hours) were capped at the duration of the previous video (e.g., 44 minutes).
+  - Integrated ultra-fast (~250ms) background YouTube metadata resolution (`resolveVideoMetadataAsync`) extracting true `approxDurationMs` so the mobile seek bar expands to the full video length (e.g., 4h 27m) instantly upon casting.
+  - Video ID binding (`currentDurationVideoId`): strictly prevents chapter timestamps or residual telemetry from previous videos from contaminating new playback sessions.
 - 👻 **100% Hidden Terminal / Zero-Console Launch (`YouTubeTV.exe` & `start.bat`):**
   - Replaced visible CMD/PowerShell terminal windows with a silent native Windows GUI launcher (`YouTubeTV.exe`, `/target:winexe`) and auto-hidden `start.bat` (`WindowStyle Hidden`), so no black terminal window ever appears or covers your screen.
   - Added `windowsHide: true` to all background helper spawns (`TvWindowManager.exe`, PowerShell, and Kiosk browser processes) for zero console flash during Standby / Wake transitions.
+- 🔄 **Full Clean Session Restart (Self-Healing Launcher):**
+  - Both `YouTubeTV.exe` and `start.bat` automatically locate and cleanly terminate stale background receiver processes, free up port `8547`, and flush Chrome Kiosk HTTP asset caches on startup. Eliminates blank white screen issues caused by Vite bundle hash mismatches.
 - ⏩ **Rock-Solid Video Seeking & Instant `+10s / -10s` Skip:**
   - Eliminated fake `LOADING` state transitions during `Player.seek()`, sending direct `onStateChange(PLAYING)` updates to the phone so consecutive `+10s` double-taps and seek-bar scrubbing never stutter or reset.
-  - Fixed initial duration synchronization (`lastNotifiedDuration`) so real video duration is always delivered to the phone immediately without being blocked by seek guards.
-  - Prevented quality/caption re-initialization on `BUFFERING -> PLAYING` transitions after seeking, keeping playback completely smooth.
   - Added PC keyboard shortcuts `ArrowLeft` (`-10s`) and `ArrowRight` (`+10s`) alongside `-30s / -10s / +10s / +30s` buttons on the Web Remote.
 - 🎬 **Video Resolution / Quality Selector (`4K`, `2K`, `1080p`, `720p`, `480p`, `Auto`):**
   - Choose and persist your preferred playback resolution directly from the TV screen or Mobile Web Remote (`/remote`).
@@ -35,31 +40,6 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 - 🌙 **Reliable Auto-Standby on Video End:**
   - Automatically returns to Standby Mode and minimizes the TV window 1 second after a video finishes when no next video is queued.
 
-### 🌟 Highlights from v1.2.0
-
-- ⚙️ **Custom Actions & Automation Settings (Phone Volume Trigger):**
-  - **Volume = 0% / Mute Trigger:** Configure any executable, script, or application (`.exe`, `.bat`, PowerShell, terminal) to launch automatically when you pull volume to 0% or press Mute on your phone.
-  - **Wake Trigger:** Optionally execute a custom action when the TV is woken up or volume is restored.
-  - **Auto-Collapse Toggle:** Turn on or off auto-minimizing the TV window to the taskbar when muted.
-  - **Interactive Test Button:** Verify command paths instantly from the Settings modal before saving.
-  - **Persistent Storage:** Saved permanently via `/api/settings/automation` into `.yt-cast-store.json`.
-- 🧹 **Complete Resource Cleanup & Stop Scripts (`stop.bat` & `tat-tv.bat`):**
-  - Dedicated shutdown scripts (`stop.bat` / `tat-tv.bat`) and Start menu shortcut to instantly terminate port 8547 and Chrome TV profile without leaving orphaned/zombie background services.
-  - `start.bat` interactive exit: pressing any key at the end of `start.bat` cleans up all background processes automatically.
-- 🎯 **Eliminated 100% of Window Matching False-Positives (`TvWindowManager.exe`):**
-  - Upgraded window scanner: directly inspects WMI command lines for `YouTubeTV_Profile` and strictly checks page titles (`YouTube TV trên máy tính Windows`), preventing normal personal YouTube browser tabs from blocking Kiosk TV startup.
-- 🎯 **Precise YouTube Tab Targeting (Windows UI Automation):**
-  - Powered by native `System.Windows.Automation` in `TvWindowManager.exe`. When running inside a browser with multiple tabs, it inspects the accessibility tree and automatically invokes `Select()` on the exact "YouTube TV" tab so you are never left looking at an unrelated tab.
-  - Standalone App Mode (`--app="http://localhost:8547?tv=1"`) isolates the TV window completely from your personal browser tabs.
-- 🪟 **Zero-Flicker Window Focus (No Alt-Tab Visuals):**
-  - Switched `SwitchToThisWindow(hWnd, false)` and removed simulated `VK_MENU` (Alt key) taps. The TV window pops smoothly to the top of your screen (`HWND_TOPMOST`) with zero Alt-Tab switcher flicker or overlay.
-- 🐛 **Bug Fixes:**
-  - **Fixed `start.bat` Inaction:** Resolved an issue where `/api/is-kiosk-running` counted background WebSocket connections, falsely reporting the Kiosk window was already active and skipping browser launch.
-  - **Fixed Chrome Silent Crash:** Removed an aggressive multi-process kill loop in `server.ts` that erroneously terminated Chrome's GPU and renderer helper processes on startup.
-  - **Bypassed Crash Recovery Popups:** Added `--disable-session-crashed-bubble`, `--profile-directory=Default`, and `--disable-features=ProfilePicker`.
-- ⚡ **Native C# Window Manager (`bin/TvWindowManager.exe`):**
-  - Ultra-fast native binary (~80ms execution) connected to interactive desktop `WinSta0\Default`.
-
 ---
 
 ### ✨ Key Features
@@ -70,33 +50,160 @@ Transform any Windows PC or laptop into a dedicated **YouTube Smart TV Cast Rece
 - 🖥️ **Multi-Monitor Selector with Persistent Memory:** Automatically detects all monitors connected to your Windows PC (`Primary` / `Secondary / TV`). Switch the fullscreen TV window to any monitor with 1 click and automatically open on that saved monitor on every future startup.
 - 🔊 **Smart Volume Memory (30% Startup Default):** Initializes at a comfortable `30%` volume level and remembers your custom volume setting across sessions and reconnections.
 - 📱 **Mobile Web Remote via QR Code:** Scan the on-screen QR code with your phone camera to control volume, mute, relative seeking (`-10s` / `+10s`), fullscreen toggle, or paste direct YouTube links.
-- ⏻ **Zero-Mouse Kiosk Mode & Fullscreen Quit Button:** `start.bat` waits until the local server is 100% ready before launching borderless fullscreen Kiosk mode, and includes a dedicated **`⏻ Quit TV`** button right on the Fullscreen overlay to cleanly exit Kiosk mode and stop the server.
+- ⏻ **Zero-Mouse Kiosk Mode & Fullscreen Quit Button:** Dedicated **`⏻ Quit TV`** button right on the Fullscreen overlay to cleanly exit Kiosk mode and stop all services.
 - 🌐 **Built-in Bilingual Support:** Toggle between English and Vietnamese anytime with 1 click.
 
 ---
 
-### 🚀 Quick Start (Windows)
+### 📥 Detailed Windows Installation Guide
 
-#### Option 1: Standalone Windows Installer (Recommended for End-Users)
-> [!TIP]
-> **No Node.js or command line required!** The installer bundles an embedded portable Node.js runtime and native launcher.
-1. Download **`YouTube-TV-Receiver-Setup-v1.4.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) section.
-2. Run the installer and click **Next > Install**.
-3. Choose whether to create a Desktop icon and whether to **Auto-start on Windows boot**.
-4. Double-click the **YouTube TV Receiver** Desktop icon anytime to launch directly into Fullscreen Kiosk mode!
+#### Method 1: Using the 1-Click Installer (Recommended)
 
-#### Option 2: Run from Source / Developer Mode (`start.bat`)
-1. **Clone this repository:**
+1. **Download:** Grab the latest **`YouTube-TV-Receiver-Setup-v1.4.0.exe`** from the [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) page.
+2. **Launch Installer:**
+   - If Windows SmartScreen displays *"Windows protected your PC"* / *"Windows đã bảo vệ PC của bạn"*:
+     > [!NOTE]
+     > Click **More info** (Thông tin khác) ➔ Click **Run anyway** (Vẫn chạy).
+     > *Reason: This open-source community tool is built with Inno Setup and is not signed with an expensive corporate EV code-signing certificate.*
+3. **Follow the Setup Wizard:**
+   - Choose your installation directory (default: `C:\Program Files\YouTube TV Receiver`).
+   - Check **Create a desktop shortcut** to access the app easily.
+   - *(Optional)* Check **Launch on Windows startup** if you want your PC or HTPC to function as an always-ready TV receiver whenever turned on.
+4. **Windows Firewall Notification:**
+   - The first time the application runs, Windows Firewall may ask to permit network access:
+     - Check **Private networks** (Mạng riêng tư) and click **Allow access** (Cho phép truy cập).
+     - *This allows the DIAL/SSDP discovery protocol (UDP 1900) and HTTP/WebSocket server (TCP 8547) to communicate with your phone on your local Wi-Fi.*
+5. **Uninstalling:**
+   - To remove the app, simply go to Windows **Settings ➔ Apps ➔ Installed apps**, search for **YouTube TV Receiver**, and click **Uninstall**. Everything is removed cleanly.
+
+#### Method 2: Portable / Developer Mode (`start.bat`)
+
+1. **Clone repository:**
    ```bash
    git clone https://github.com/viphuygia/youtube-tv-pc-receiver.git
    cd youtube-tv-pc-receiver
    ```
-2. **Launch:** Double-click on **`start.bat`** or **`YouTubeTV.exe`**.
-   * Requires Node.js v18+.
-   * Automatically installs dependencies on first run and opens in Kiosk mode with zero terminal window.
+2. **Run:** Double-click on **`YouTubeTV.exe`** or **`start.bat`** (requires Node.js v18+).
+3. The app automatically runs headless with zero visible terminal windows.
 
-#### 📦 Building the Installer Yourself:
-Simply double-click **`build-installer.bat`**. It compiles the React frontend, bundles the backend, builds the C# native launcher, and generates `dist-installer\YouTube-TV-Receiver-Setup-v1.4.0.exe` using Inno Setup.
+---
+
+### 🛡️ Security & Privacy Policy
+
+- 🔒 **100% Local LAN Communication:** All Cast communication (DIAL protocol, Lounge tokens, WebSocket commands) occurs strictly between your phone and your PC over your private home Wi-Fi network. No telemetry or watch history is ever forwarded to third-party tracking servers.
+- 🛡️ **Zero Credential Storage:** The receiver does not request, log, or store your Google password, 2FA tokens, or cookies. Pairings use Google's official public 12-digit TV lounge pairing protocol.
+- 🛡️ **Isolated Browser Sandbox:** Runs inside an independent Chromium profile (`%TEMP%\YouTubeTV_Profile`), completely insulated from your personal browsing history, cookies, and passwords.
+- 🧹 **Clean Shutdown Guarantee:** Shuts down all helper processes and frees network ports cleanly via `stop.bat` or the on-screen **Quit TV** button.
+
+---
+
+### ⚖️ Legal & Trademark Notice
+
+- **Trademark Disclaimer:** YouTube, YouTube TV, Android, Google Chrome, and their respective logos are registered trademarks of **Google LLC** and **Alphabet Inc.**
+- **Non-Affiliation:** This project is an independent open-source receiver tool developed for personal and living room media-center use. It is **not** endorsed by, sponsored by, affiliated with, or associated with Google LLC, Alphabet Inc., or YouTube in any way.
+- **Terms of Service Compliance:** Video playback is powered by standard YouTube Embedded Player APIs (`youtube.com/embed`) and open DIAL/UPnP cast discovery standards. This software does not bypass content paywalls, does not download or re-host video streams, does not circumvent content encryption, and does not alter YouTube video delivery.
+- **Content Rights:** All video content, titles, audio, and thumbnails streamed through this application remain the exclusive property of their respective creators and copyright owners.
+
+---
+
+<br />
+<hr />
+<br />
+
+<a id="tiếng-việt"></a>
+## 🇻🇳 Tiếng Việt
+
+Biến bất kỳ máy tính Windows nào thành một chiếc **Smart TV thu sóng YouTube** chuyên nghiệp không cần dùng chuột. Truyền video (Cast) trực tiếp từ ứng dụng **YouTube trên iPhone / Android** sang máy tính qua mạng Wi-Fi hoặc mã liên kết TV 12 chữ số chính thức. Đồng bộ chuẩn xác 1:1 thanh thời gian thực của từng video, hỗ trợ chọn và ghi nhớ màn hình phụ/TV, tính năng Chế độ ẩn TV giải phóng màn hình PC cùng bộ kích hoạt phím tắt linh hoạt từ điện thoại.
+
+### 🌟 Tính Năng Mới Trên Phiên Bản v1.4.0
+
+- ⏱️ **Tự Động Nhận Diện Thời Lượng Chuẩn Cho Mọi Video (Bao Gồm Video Dài 3–4+ Tiếng):**
+  - Sửa dứt điểm hiện tượng video dài (> 3 tiếng) bị giới hạn thanh tua ở mức 44 phút do nhận nhầm thời lượng của video trước đó.
+  - Tích hợp cơ chế tải trước siêu dữ liệu từ YouTube siêu tốc (~250ms) bằng [`resolveVideoMetadataAsync`](server.ts), đọc trực tiếp `approxDurationMs` giúp thanh tua trên điện thoại mở rộng đầy đủ 100% (ví dụ video 4 giờ 27 phút) ngay khi bấm phát.
+  - Cơ chế ràng buộc thời lượng theo ID video (`currentDurationVideoId`): Chống rò rỉ thời lượng giữa các video liên tiếp và ngăn chặn các gói tin chương lẻ (Chapter/Tập) ghi đè làm tụt thời lượng tổng.
+- 👻 **Ẩn Hoàn Toàn Cửa Sổ Terminal / CMD Khi Chạy App (`YouTubeTV.exe` & `start.bat`):**
+  - Tích hợp trình khởi chạy Native GUI (`YouTubeTV.exe`, `/target:winexe`) ngay tại thư mục gốc và tự động đóng/ẩn cửa sổ `start.bat` (`WindowStyle Hidden`), giúp mở TV êm ru mà không bao giờ hiện cửa sổ CMD đen đè lên màn hình.
+  - Gắn cờ `windowsHide: true` cho toàn bộ tiến trình nền (`TvWindowManager.exe`, PowerShell, trình duyệt Kiosk) để không nháy cửa sổ dòng lệnh khi ẩn/hiện TV.
+- 🔄 **Khởi Động Sạch Sẽ (Full Clean Session Restart):**
+  - Cả `YouTubeTV.exe` và `start.bat` đều tự động kiểm tra và dọn dẹp các session cũ, giải phóng cổng `8547` và xóa sạch bộ nhớ đệm HTTP của Chrome Kiosk trước khi mở lại. Loại bỏ triệt để hiện tượng trắng màn hình do lệch mã băm bundle Vite.
+- ⏩ **Tua Video & Nhảy Nhanh `+10s / -10s` Siêu Mượt & Ổn Định Tuyệt Đối:**
+  - Loại bỏ trạng thái `LOADING` giả lập khi tua (`Player.seek()`), gửi trực tiếp phản hồi `onStateChange(PLAYING)` về điện thoại giúp thao tác bấm đúp `+10s` liên tiếp hoặc kéo thanh trượt mượt mà 100%, không bị giật lùi hay mất bộ đếm.
+  - Bổ sung phím tắt bàn phím PC `Mũi tên Trái / Phải` (`-10s / +10s`) bên cạnh cụm nút `-30s / -10s / +10s / +30s` trên Web Remote.
+- 🎬 **Tùy Chỉnh Độ Phân Giải Video (`4K`, `2K`, `1080p`, `720p`, `480p`, `Auto`):**
+  - Chọn và ghi nhớ độ phân giải ưu tiên ngay trên giao diện TV hoặc trên trang điều khiển điện thoại (`/remote`).
+- 💬 **Bật / Tắt Phụ Đề (CC / Subtitles) Chủ Động:**
+  - Mặc định tắt phụ đề (`cc_load_policy=0`) và tự động gỡ module `captions` khi ở chế độ Tắt.
+  - Hỗ trợ bật/tắt phụ đề trực tiếp từ nút **CC trên app YouTube của iPhone**, nút **CC** trên màn hình TV (phím tắt `C`), hoặc trên Web Remote (`Tắt` / `Tiếng Việt` / `English`).
+- 📡 **Hỗ Trợ Tua Ngược (DVR Rewind) Cho Video Công Chiếu & Trực Tiếp:**
+  - Đồng bộ dải `seekableStartTime` và `seekableEndTime` giúp kéo lùi trên luồng Livestream / Premiere không bị văng về Live Head.
+- 🌙 **Tự Động Về Chế Độ Chờ (Standby) Khi Hết Video:**
+  - Tự động chuyển về màn hình Chế độ chờ và thu nhỏ cửa sổ TV sau 1 giây khi phát hết video và không còn bài tiếp theo trong hàng đợi.
+
+---
+
+### 📥 Hướng Dẫn Cài Đặt Chi Tiết Trên Windows
+
+#### Cách 1: Sử Dụng Bộ Cài Đặt 1-Click (Khuyên dùng)
+
+1. **Tải file cài đặt:** Truy cập mục [Releases](https://github.com/viphuygia/youtube-tv-pc-receiver/releases) và tải file **`YouTube-TV-Receiver-Setup-v1.4.0.exe`**.
+2. **Khởi chạy cài đặt:**
+   - Nếu màn hình Windows SmartScreen hiện thông báo *"Windows protected your PC"* (Windows đã bảo vệ PC của bạn):
+     > [!NOTE]
+     > Nhấp vào dòng chữ **More info** (Thông tin khác) ➔ Chọn **Run anyway** (Vẫn chạy).
+     > *Giải thích: Đây là phần mềm nguồn mở cộng đồng được đóng gói bằng Inno Setup độc lập, chưa đăng ký chứng chỉ thương mại EV (vốn tốn hàng nghìn USD/năm của các doanh nghiệp lớn).*
+3. **Các bước thiết lập trên Wizard:**
+   - Chọn thư mục cài đặt (mặc định là `C:\Program Files\YouTube TV Receiver`).
+   - Tick chọn **Create a desktop shortcut** (Tạo biểu tượng ngoài màn hình Desktop) để mở nhanh.
+   - *(Tùy chọn)* Tick chọn **Launch on Windows startup** nếu bạn muốn biến máy tính hoặc HTPC thành một chiếc TV luôn sẵn sàng nhận lệnh Cast ngay khi bật máy.
+4. **Xác nhận tường lửa (Windows Firewall):**
+   - Khi ứng dụng khởi chạy lần đầu, hộp thoại Windows Firewall có thể hỏi quyền mạng:
+     - Hãy tick chọn **Private networks** (Mạng riêng tư / Mạng gia đình) và bấm **Allow access** (Cho phép truy cập).
+     - *Mục đích: Cho phép giao thức nhận diện Cast DIAL/SSDP (UDP 1900) và cổng máy chủ nội bộ (TCP 8547) liên lạc với điện thoại trong cùng mạng Wi-Fi.*
+5. **Gỡ cài đặt (Uninstall):**
+   - Nếu không còn nhu cầu sử dụng, bạn chỉ cần vào **Settings ➔ Apps ➔ Installed apps** (Cài đặt ➔ Ứng dụng), tìm **YouTube TV Receiver** và bấm **Uninstall**. Mọi file và tiến trình sẽ được dọn dẹp sạch sẽ.
+
+#### Cách 2: Chạy Dạng Portable / Mã Nguồn (`start.bat`)
+
+1. **Tải mã nguồn:**
+   ```bash
+   git clone https://github.com/viphuygia/youtube-tv-pc-receiver.git
+   cd youtube-tv-pc-receiver
+   ```
+2. **Chạy ứng dụng:** Nhấp đúp chuột vào file **`YouTubeTV.exe`** hoặc **`start.bat`** (yêu cầu máy có cài Node.js v18+).
+3. Ứng dụng chạy hoàn toàn ở chế độ ẩn, không có cửa sổ dòng lệnh đen nào xuất hiện.
+
+---
+
+### 🛡️ An Toàn & Bảo Mật Dữ Liệu (Security & Privacy)
+
+- 🔒 **Giao Tiếp 100% Nội Bộ (Local LAN):** Toàn bộ tín hiệu Cast, kết nối WebSocket và lệnh điều khiển chỉ trao đổi trực tiếp giữa điện thoại và máy tính của bạn trong mạng Wi-Fi gia đình. Không có bất kỳ dữ liệu cá nhân hay lịch sử xem nào bị gửi ra máy chủ theo dõi của bên thứ ba.
+- 🛡️ **Không Thu Thập Mật Khẩu / Tài Khoản:** Ứng dụng không yêu cầu đăng nhập tài khoản Google trên PC, không lưu cookie hay token xác thực nhạy cảm. Quá trình kết nối dựa trên mã TV 12 số công khai chuẩn của Google Lounge.
+- 🛡️ **Profile Trình Duyệt Cô Lập:** Trình duyệt Kiosk chạy trong thư mục profile riêng biệt (`%TEMP%\YouTubeTV_Profile`), hoàn toàn độc lập và không can thiệp vào tài khoản, lịch sử hay mật khẩu trên trình duyệt Chrome/Edge chính của bạn.
+- 🧹 **Tắt Sạch Mọi Tiến Trình Nền:** Cung cấp lệnh tắt chuyên dụng qua nút **⏻ Tắt TV** trên màn hình hoặc file `stop.bat`, giải phóng toàn bộ cổng mạng và tắt tiến trình TV mà không ảnh hưởng tới công việc của bạn.
+
+---
+
+### ⚖️ Tuyên Bố Pháp Lý & Bản Quyền (Legal Disclaimer)
+
+- **Về nhãn hiệu:** YouTube, YouTube TV, Android, Google Chrome và các logo tương ứng là nhãn hiệu đã được đăng ký của **Google LLC** và **Alphabet Inc.**
+- **Mối quan hệ pháp lý:** Dự án này là một công cụ phần mềm nguồn mở độc lập phục vụ mục đích giải trí gia đình cá nhân, **hoàn toàn không** được tài trợ, ủy quyền, chứng thực hay liên kết trực tiếp với Google LLC, Alphabet Inc. hay YouTube.
+- **Tuân thủ điều khoản dịch vụ (ToS):** Quá trình phát nội dung được vận hành dựa trên Trình phát Nhúng IFrame chính thức của YouTube (`youtube.com/embed`) và giao thức mở chuẩn DIAL/UPnP. Ứng dụng **không** phá khóa bản quyền, **không** tải lậu video, **không** can thiệp vào cơ chế DRM và **không** bẻ khóa luồng phát của YouTube.
+- **Quyền tác giả nội dung:** Tất cả các video, âm thanh, hình ảnh thu nhỏ (thumbnails) và tiêu đề phát qua ứng dụng đều thuộc bản quyền tuyệt đối của các nhà sáng tạo nội dung và chủ sở hữu bản quyền tương ứng trên nền tảng YouTube.
+
+---
+
+### 🛠️ Công Nghệ & Kiến Trúc (Architecture)
+
+* **Frontend:** React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Two-Way YouTube IFrame Widget API Bridge.
+* **Backend:** Node.js, Express, WebSocket (`ws`), Windows Multi-Monitor Win32 / PowerShell Display Manager, YouTube Metadata Fetcher.
+* **Native Integration:** C# Win32 Single-Instance Kiosk Launcher (`Launcher.cs`), Inno Setup 6 Installer.
+* **Cast Engine:** `yt-cast-receiver`, Google Lounge Protocol, DIAL (Discovery and Launch) / SSDP UPnP, Persistent JSON DataStore.
+
+---
+
+### 📄 License
+
+Phát hành theo giấy phép [MIT License](LICENSE) · Released under the [MIT License](LICENSE).
 
 ---
 
