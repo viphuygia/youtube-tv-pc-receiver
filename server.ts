@@ -96,6 +96,7 @@ let currentVolumeLevel = 30; // Mặc định 30% khi khởi động
 let isVolumeMuted = false;
 let currentPositionSeconds = 0;
 let currentVideoDuration = 0; // Thời lượng thực của video (giây) đồng bộ từ YouTube IFrame Player
+let currentDurationVideoId = ''; // ID video tương ứng với currentVideoDuration để tránh gán nhầm thời lượng của video khác
 let currentSeekableStartTime = 0;
 let currentSeekableEndTime = 0;
 let positionLastUpdated = Date.now();
@@ -502,18 +503,69 @@ function broadcastPairingCode(code: string) {
   });
 }
 
-// Fetch tiêu đề video chạy ngầm không làm chậm luồng phát
-async function resolveVideoTitleAsync(videoId: string) {
+// Fetch tiêu đề & thời lượng chuẩn xác của video từ YouTube chạy ngầm
+async function resolveVideoMetadataAsync(videoId: string): Promise<{ duration: number; title: string }> {
+  let dur = 0;
+  let title = '';
+
   try {
-    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
-    if (oembedRes.ok) {
-      const oData = (await oembedRes.json()) as any;
-      if (oData?.title && currentVideo.videoId === videoId) {
-        currentVideo.title = oData.title;
-        broadcastControl({ action: 'updateTitle', videoId, title: oData.title });
+    const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const mDur = html.match(/approxDurationMs...(\d+)/);
+      if (mDur && mDur[1]) {
+        dur = Math.round(parseInt(mDur[1], 10) / 1000);
+      }
+      const mTitle = html.match(/<title>([^<]+) - YouTube<\/title>/);
+      if (mTitle && mTitle[1]) {
+        title = mTitle[1].replace(/ - YouTube$/, '').trim();
       }
     }
   } catch {}
+
+  // Dự phòng bằng oembed nếu chưa lấy được tiêu đề
+  if (!title) {
+    try {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+      if (oembedRes.ok) {
+        const oData = (await oembedRes.json()) as any;
+        if (oData?.title) title = oData.title;
+      }
+    } catch {}
+  }
+
+  if (currentVideo.videoId === videoId) {
+    if (title && (!currentVideo.title || currentVideo.title.startsWith('YouTube Video'))) {
+      currentVideo.title = title;
+      broadcastControl({ action: 'updateTitle', videoId, title });
+    }
+
+    if (dur > 0) {
+      currentDurationVideoId = videoId;
+      if (currentVideoDuration <= 0 || dur > currentVideoDuration) {
+        currentVideoDuration = dur;
+        currentSeekableEndTime = dur;
+        lastNotifiedDuration = dur;
+        console.log(`[Video Metadata] Đã tải thời lượng chuẩn từ YouTube cho (${videoId}): ${dur}s (${Math.floor(dur / 3600)}h ${Math.floor((dur % 3600) / 60)}m)`);
+      }
+      if (pendingDurationResolver) {
+        const r = pendingDurationResolver;
+        pendingDurationResolver = null;
+        r(dur);
+      }
+      forceLoungeTimelineResync('Metadata duration resolved');
+    }
+  }
+
+  return { duration: dur, title };
+}
+
+async function resolveVideoTitleAsync(videoId: string) {
+  return resolveVideoMetadataAsync(videoId);
 }
 
 // ==========================================
@@ -578,6 +630,19 @@ class FastPlaylistRequestHandler {
 // OFFICIAL YOUTUBE CAST PLAYER IMPLEMENTATION
 // ==========================================
 class WebCastPlayer extends Player {
+  onBeforePlay(video: any, position: number) {
+    console.log(`[Cast Player onBeforePlay] Chuẩn bị phát video mới: ${video.id}`);
+    currentVideo.videoId = video.id;
+    currentDurationVideoId = video.id;
+    currentVideoDuration = 0;
+    currentSeekableStartTime = 0;
+    currentSeekableEndTime = 0;
+    lastNotifiedDuration = 0;
+    lastDurationNotifyTime = 0;
+    currentPositionSeconds = Math.max(0, Math.floor(Number(position) || 0));
+    positionLastUpdated = Date.now();
+  }
+
   protected async doPlay(video: any, position: number): Promise<boolean> {
     const startSec = Math.max(0, Math.floor(Number(position) || 0));
     console.log(`[YouTube Cast Received from iPhone] Video ID: ${video.id}, Position: ${startSec}s`);
@@ -593,6 +658,7 @@ class WebCastPlayer extends Player {
     isVideoPlaying = true;
 
     // Luôn đặt lại toàn bộ thời lượng và dải seek khi bắt đầu bất kỳ lượt phát mới nào để không bao giờ dính dữ liệu của video cũ
+    currentDurationVideoId = video.id;
     currentVideoDuration = 0;
     currentSeekableStartTime = 0;
     currentSeekableEndTime = 0;
@@ -618,22 +684,23 @@ class WebCastPlayer extends Player {
       source: 'iPhone YouTube App'
     });
 
-    if (!video.title) {
-      resolveVideoTitleAsync(video.id);
-    }
+    // Kích hoạt ngay việc tải metadata (thời lượng thực & tiêu đề đầy đủ từ YouTube)
+    const metaPromise = resolveVideoMetadataAsync(video.id);
 
-    // Chờ tối đa 1800ms để trình phát YouTube trên PC tải xong video mới và gửi về thời lượng thực (duration > 0)
-    // Nhờ đó bản tin NowPlaying đầu tiên gửi về iPhone luôn có tổng thời lượng chuẩn xác (không bị duration=0 làm văng chấm đỏ về cuối thanh)
+    // Chờ tối đa 1600ms hoặc khi metadata / trình phát IFrame đã xác nhận xong duration thực
     if (currentVideoDuration <= 0 && connectedClients.size > 0) {
-      await new Promise<number>((resolve) => {
-        pendingDurationResolver = resolve;
-        setTimeout(() => {
-          if (pendingDurationResolver === resolve) {
-            pendingDurationResolver = null;
-            resolve(currentVideoDuration);
-          }
-        }, 1800);
-      });
+      await Promise.race([
+        metaPromise,
+        new Promise<number>((resolve) => {
+          pendingDurationResolver = resolve;
+          setTimeout(() => {
+            if (pendingDurationResolver === resolve) {
+              pendingDurationResolver = null;
+              resolve(currentVideoDuration);
+            }
+          }, 1600);
+        })
+      ]);
     }
 
     lastLoungeSyncPosition = currentPositionSeconds;
@@ -669,7 +736,10 @@ class WebCastPlayer extends Player {
   protected async doStop(): Promise<boolean> {
     console.log('[YouTube Cast from iPhone] Stop/Transition command');
     isVideoPlaying = false;
-    // Không dừng cứng giao diện khi vuốt chuyển video, chỉ lên lịch ẩn nếu sau 3s không có video nào
+    currentVideoDuration = 0;
+    currentSeekableEndTime = 0;
+    currentDurationVideoId = '';
+    lastNotifiedDuration = 0;
     return true;
   }
 
@@ -725,12 +795,17 @@ class WebCastPlayer extends Player {
   }
 
   protected async doGetDuration(): Promise<number> {
-    // Trả về chính xác thời lượng thực (hoặc live edge đối với video trực tiếp/công chiếu) để thanh tua trên iPhone kéo mượt
+    if (currentDurationVideoId && currentVideo.videoId && currentDurationVideoId !== currentVideo.videoId) {
+      return 0;
+    }
     const effDur = Math.max(currentVideoDuration, currentSeekableEndTime);
     return effDur > 0 ? Math.round(effDur) : 0;
   }
 
   async getSeekableRange(): Promise<{ start: number; end: number }> {
+    if (currentDurationVideoId && currentVideo.videoId && currentDurationVideoId !== currentVideo.videoId) {
+      return { start: 0, end: 0 };
+    }
     const effEnd = Math.max(currentVideoDuration, currentSeekableEndTime);
     return {
       start: 0,
@@ -1349,20 +1424,22 @@ wss.on('connection', (ws: WebSocket) => {
         // Cập nhật thời lượng thực (không dùng Math.max tích lũy qua nhiều bài để tránh kẹt duration của video dài trước đó)
         const nextDur = Math.max(incomingDur, incomingSeekEnd);
         if (nextDur > 0) {
-          currentVideoDuration = nextDur;
-          currentSeekableEndTime = nextDur;
+          // Bảo vệ: Chỉ cập nhật nếu backend chưa có duration hoặc client phát hiện duration lớn hơn (tránh bị gói tin lẻ/chương/tồn đọng nhỏ hơn ghi đè)
+          if (currentVideoDuration <= 0 || nextDur > currentVideoDuration) {
+            currentVideoDuration = nextDur;
+            currentSeekableEndTime = nextDur;
+            currentDurationVideoId = currentVideo.videoId;
+          }
 
-          // Thông báo ngay lập tức cho iPhone ở lần đầu có duration thực (lastNotifiedDuration === 0)
-          // hoặc khi duration thay đổi >= 1s (video thường) / >= 15s (video Trực tiếp đang tăng từng giây)
-          const isLiveTick = lastNotifiedDuration > 0 && Math.abs(nextDur - lastNotifiedDuration) <= 3;
+          const isLiveTick = lastNotifiedDuration > 0 && Math.abs(currentVideoDuration - lastNotifiedDuration) <= 3;
           if (
             lastNotifiedDuration === 0 ||
-            (!isLiveTick && Math.abs(nextDur - lastNotifiedDuration) >= 1) ||
-            (isLiveTick && Math.abs(nextDur - lastNotifiedDuration) >= 15 && Date.now() - lastDurationNotifyTime > 10000)
+            (!isLiveTick && Math.abs(currentVideoDuration - lastNotifiedDuration) >= 1) ||
+            (isLiveTick && Math.abs(currentVideoDuration - lastNotifiedDuration) >= 15 && Date.now() - lastDurationNotifyTime > 10000)
           ) {
             durationChanged = true;
             shouldNotifyLounge = true;
-            lastNotifiedDuration = nextDur;
+            lastNotifiedDuration = currentVideoDuration;
             lastDurationNotifyTime = Date.now();
             console.log(`[Player Sync] Đã đồng bộ thời lượng thực của video (${currentVideo.videoId}): ${currentVideoDuration}s (pos=${Math.floor(currentPositionSeconds)}s)`);
           }
@@ -1637,6 +1714,7 @@ app.post('/api/cast', async (req, res) => {
       } catch {}
     }
 
+    currentDurationVideoId = targetId;
     currentVideoDuration = 0;
     currentSeekableStartTime = 0;
     currentSeekableEndTime = 0;
@@ -1645,6 +1723,8 @@ app.post('/api/cast', async (req, res) => {
     lastSeekTimestamp = 0;
     currentPositionSeconds = 0;
     positionLastUpdated = Date.now();
+
+    resolveVideoMetadataAsync(targetId);
 
     broadcastVideo({
       videoId: targetId,

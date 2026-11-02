@@ -258,14 +258,13 @@ export default function App() {
               iframeLoadedVideoIdRef.current = info.videoData.video_id;
             }
 
-            // Chặn triệt để các gói tin infoDelivery tồn đọng của video cũ trong lúc đang chuyển sang video mới
+            // Chặn triệt để mọi gói tin telemetry cũ hoặc tồn đọng cho đến khi IFrame xác nhận đúng video_id mới
             if (
               currentVideoIdRef.current &&
-              iframeLoadedVideoIdRef.current &&
               iframeLoadedVideoIdRef.current !== currentVideoIdRef.current
             ) {
-              // Nếu sau 900ms mà IFrame vẫn kẹt ở video cũ (do cửa sổ vừa đánh thức từ Standby), ép nạp lại video mới
-              if (!isStandbyRef.current && Date.now() - videoLoadTimestampRef.current > 900) {
+              // Nếu sau 1200ms mà IFrame vẫn kẹt ở video cũ (do vừa đánh thức từ Standby), ép nạp lại video mới
+              if (!isStandbyRef.current && Date.now() - videoLoadTimestampRef.current > 1200) {
                 videoLoadTimestampRef.current = Date.now();
                 const startAt = expectedStartSecRef.current || 0;
                 if (startAt > 0) {
@@ -275,15 +274,6 @@ export default function App() {
                 }
                 sendIframeCommand('playVideo', []);
               }
-              return;
-            }
-
-            // Trong 600ms đầu tiên khi vừa gửi loadVideoById, nếu IFrame chưa xác nhận videoData.video_id mới thì bỏ qua telemetry cũ
-            if (
-              currentVideoIdRef.current &&
-              !iframeLoadedVideoIdRef.current &&
-              Date.now() - videoLoadTimestampRef.current < 600
-            ) {
               return;
             }
 
@@ -317,16 +307,18 @@ export default function App() {
 
             const infoDur = typeof info.duration === 'number' && !isNaN(info.duration) && info.duration > 0 ? info.duration : 0;
             const progDur = typeof info.progressState?.duration === 'number' && info.progressState.duration > 0 ? info.progressState.duration : 0;
-            const rawDur = infoDur > 0
-              ? Math.max(infoDur, playerSeekableEndRef.current)
-              : Math.max(progDur, playerSeekableEndRef.current);
+            const progSeek = typeof info.progressState?.seekableEnd === 'number' && info.progressState.seekableEnd > 0 ? info.progressState.seekableEnd : 0;
+            const rawDur = Math.max(infoDur, progDur, progSeek);
 
             if (rawDur > 0) {
-              if (playerDurationRef.current === 0 || Math.abs(rawDur - playerDurationRef.current) >= 1) {
-                forceImmediateSync = true;
+              // Không để thời lượng bị tụt giảm xuống nếu trước đó đã nhận thời lượng lớn hơn
+              if (playerDurationRef.current <= 0 || rawDur > playerDurationRef.current) {
+                if (playerDurationRef.current === 0 || Math.abs(rawDur - playerDurationRef.current) >= 1) {
+                  forceImmediateSync = true;
+                }
+                playerDurationRef.current = rawDur;
+                playerSeekableEndRef.current = rawDur;
               }
-              playerDurationRef.current = rawDur;
-              playerSeekableEndRef.current = rawDur;
             }
 
             if (typeof info.playerState === 'number') {
@@ -379,7 +371,7 @@ export default function App() {
                 JSON.stringify({
                   type: 'player_sync',
                   videoId: currentVideoIdRef.current,
-                  verifiedVideoId: iframeLoadedVideoIdRef.current || currentVideoIdRef.current,
+                  verifiedVideoId: iframeLoadedVideoIdRef.current === currentVideoIdRef.current ? currentVideoIdRef.current : '',
                   position: playerTimeRef.current,
                   duration: playerDurationRef.current,
                   seekableStart: 0,
@@ -821,7 +813,7 @@ export default function App() {
                     JSON.stringify({
                       type: 'player_sync',
                       videoId: currentVideoIdRef.current,
-                      verifiedVideoId: iframeLoadedVideoIdRef.current || currentVideoIdRef.current,
+                      verifiedVideoId: iframeLoadedVideoIdRef.current === currentVideoIdRef.current ? currentVideoIdRef.current : '',
                       position: playerTimeRef.current,
                       duration: playerDurationRef.current,
                       seekableStart: 0,
@@ -997,7 +989,7 @@ export default function App() {
         JSON.stringify({
           type: 'player_sync',
           videoId: currentVideoIdRef.current,
-          verifiedVideoId: iframeLoadedVideoIdRef.current || currentVideoIdRef.current,
+          verifiedVideoId: iframeLoadedVideoIdRef.current === currentVideoIdRef.current ? currentVideoIdRef.current : '',
           position: playerTimeRef.current,
           duration: playerDurationRef.current,
           seekableStart: 0,
