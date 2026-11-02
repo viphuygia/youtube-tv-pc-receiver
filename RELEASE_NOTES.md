@@ -1,67 +1,62 @@
-# Release Notes - YouTube TV Receiver for Windows v1.2.0
+# Release Notes - YouTube TV Receiver for Windows v1.4.0
 
-🎉 **Release v1.2.0** — Custom Automation Actions, Precise Tab Targeting, Zero-Flicker Focus, Complete Service Termination, and Core Bug Fixes.
+🎉 **Release v1.4.0** — Exact Video Duration Resolution for Long Videos (> 3-4h), Hidden Terminal Native Launcher, Full Clean Session Restart, Ultra-Smooth Video Seeking, Video Quality & Subtitles Controls, DVR Rewind on Premieres/Live, and Auto-Standby on Video End.
+
+### 📦 Download Installer (Tải bộ cài đặt):
+- [⬇️ **Download YouTube-TV-Receiver-Setup-v1.4.0.exe**](https://github.com/viphuygia/youtube-tv-pc-receiver/releases/download/v1.4.0/YouTube-TV-Receiver-Setup-v1.4.0.exe) (~29.1 MB)
 
 ---
 
 ## 🇬🇧 English
 
-### Highlights in v1.2.0
+### Highlights in v1.4.0
 
-- ⚙️ **Custom Action & Automation Settings (Phone Volume Trigger):**
-  - **Volume = 0% / Mute Trigger:** Easily configure any application, batch script, or executable (`.exe`, `.bat`, PowerShell, terminal) to launch automatically when you lower volume to 0% or tap Mute from your phone.
-  - **Wake / Volume > 0% Trigger:** Optionally execute a custom script or application when the TV is woken up, volume is restored, or a new video is cast.
-  - **Auto-Collapse Toggle:** Turn on/off whether the TV window minimizes down to the Windows Taskbar when volume is muted.
-  - **Interactive Test Run:** Convenient "Test Run" button in the Settings modal allows immediate verification of command execution directly from the PC interface.
-  - **Persistent Settings:** Fully persisted via the `/api/settings/automation` REST API into `.yt-cast-store.json`.
-- 🧹 **Complete Service Cleanup & Dedicated Stop Scripts (`stop.bat` & `tat-tv.bat`):**
-  - Included dedicated shutdown scripts (`stop.bat` & `tat-tv.bat`) and an optional Start Menu shortcut ("Stop YouTube TV").
-  - Forcefully and cleanly terminates all background Node processes listening on port 8547 and closes all browser processes tied to `YouTubeTV_Profile` without touching personal browser windows.
-  - Interactive exit in `start.bat`: pressing any key automatically triggers the complete cleanup routine so no orphaned or zombie background processes linger in Task Manager.
-- 🎯 **Eliminated Window Detection False-Positives in `TvWindowManager.exe`:**
-  - Previously, `TvWindowManager` checked the generic substring `"YouTube"`, causing it to match any regular video tab open in personal Chrome/Edge windows. This led `start.bat` to falsely believe the TV app was already active and skip launching the Kiosk window.
-  - Upgraded detection algorithm to query WMI directly for processes launched with `--user-data-dir=...YouTubeTV_Profile` and strictly match window titles (`"YouTube TV trên máy tính Windows"` / `"Trải Nghiệm TV Leanback PC"`). 
-  - Sub-millisecond execution (~80ms) with 0% false positives and 0% false negatives.
-- 🎯 **Precise YouTube Tab Targeting (Windows UI Automation):**
-  - Integrated native `System.Windows.Automation` into `TvWindowManager.exe`. When running in a multi-tab browser, it scans the UI tree and automatically invokes `SelectionItemPattern.Select()` on the exact "YouTube TV" tab, ensuring you are never stuck on an unrelated work tab.
-  - Switched `start.bat` and native launcher to dedicated app mode (`--app="http://localhost:8547?tv=1"`), creating an isolated, single-instance app window that never mixes with regular browsing tabs.
-- 🪟 **Zero-Flicker Direct Focus (Eliminated Alt-Tab Flash):**
-  - Replaced `SwitchToThisWindow(hWnd, true)` with `SwitchToThisWindow(hWnd, false)` and removed simulated `VK_MENU` (Alt key) taps. The window now comes smoothly to the foreground without any Alt-Tab switcher overlay or visual flicker.
-- 🐛 **Bug Fix: Multi-Process Chrome Crash on Launch:**
-  - Removed an aggressive `Stop-Process` loop in `server.ts` that previously mistook Chrome's multi-process architecture (GPU, Renderer, Network) for duplicate instances and terminated helper processes, crashing the browser.
-- 🛡️ **Session Crash Popup Bypass:**
-  - Added `--disable-session-crashed-bubble`, `--profile-directory=Default`, and `--disable-features=ProfilePicker` to guarantee Chrome always starts directly into full screen without "Restore pages?" prompts.
-- ⚡ **High-Performance Native Window Manager (`bin/TvWindowManager.exe`):**
-  - Standalone compiled C# native binary connected to interactive desktop `WinSta0\Default`, guaranteeing ultra-fast minimize, restore (`HWND_TOPMOST`), and window status queries.
+- ⏱️ **Exact Video Duration Resolution & Cross-Video Sync:**
+  - Resolved the bug where long videos (> 3 to 4 hours) were capped at the duration of the previous video (e.g., 44 minutes).
+  - Integrated ultra-fast (~250ms) background YouTube metadata resolution (`resolveVideoMetadataAsync`) extracting true `approxDurationMs` so the mobile seek bar expands to the full video length (e.g., 4h 27m) instantly upon casting.
+  - Video ID binding (`currentDurationVideoId`): strictly prevents chapter timestamps or residual telemetry from previous videos from contaminating new playback sessions.
+- 👻 **100% Hidden Terminal / Zero-Console Launch (`YouTubeTV.exe` & `start.bat`):**
+  - Replaced visible CMD/PowerShell terminal windows with a silent native Windows GUI launcher (`YouTubeTV.exe`, `/target:winexe`) and auto-hidden `start.bat` (`WindowStyle Hidden`), so no black terminal window ever appears or covers your screen.
+  - Added `windowsHide: true` to all background helper spawns (`TvWindowManager.exe`, PowerShell, and Kiosk browser processes) for zero console flash during Standby / Wake transitions.
+- 🔄 **Full Clean Session Restart (Self-Healing Launcher):**
+  - Both `YouTubeTV.exe` and `start.bat` automatically locate and cleanly terminate stale background receiver processes, free up port `8547`, and flush Chrome Kiosk HTTP asset caches on startup. Eliminates blank white screen issues caused by Vite bundle hash mismatches.
+- ⏩ **Rock-Solid Video Seeking & Instant `+10s / -10s` Skip:**
+  - Eliminated fake `LOADING` state transitions during `Player.seek()`, sending direct `onStateChange(PLAYING)` updates to the phone so consecutive `+10s` double-taps and seek-bar scrubbing never stutter or reset.
+  - Added PC keyboard shortcuts `ArrowLeft` (`-10s`) and `ArrowRight` (`+10s`) alongside `-30s / -10s / +10s / +30s` buttons on the Web Remote.
+- 🎬 **Video Resolution / Quality Selector (`4K`, `2K`, `1080p`, `720p`, `480p`, `Auto`):**
+  - Choose and persist your preferred playback resolution directly from the TV screen or Mobile Web Remote (`/remote`).
+- 💬 **Full Subtitles / Closed Captions (CC) Control:**
+  - Subtitles are off by default (`cc_load_policy=0`) with active module unloading (`captions` / `cc`) so even creator-forced captions stay off when disabled.
+  - Full support for toggling CC directly from the iPhone YouTube app (`setSubtitlesTrack`), TV UI (`CC` button or `C` key), and Web Remote (`OFF` / `Vietnamese` / `English`).
+- 📡 **Live Stream & Premiere DVR Rewind Support:**
+  - Synchronizes `seekableStartTime` and `seekableEndTime` from YouTube `progressState` so you can rewind Live streams and Premieres freely.
+- 🌙 **Reliable Auto-Standby on Video End:**
+  - Automatically returns to Standby Mode and minimizes the TV window 1 second after a video finishes when no next video is queued.
 
 ---
 
 ## 🇻🇳 Tiếng Việt
 
-### Các điểm nổi bật trong phiên bản v1.2.0
+### Các Nâng Cấp Nổi Bật Trong v1.4.0
 
-- ⚙️ **Hệ thống Cài đặt Hành động Tùy chỉnh & Tự động hóa (Trigger Âm lượng iPhone):**
-  - **Kích hoạt khi Âm lượng về 0% hoặc Bấm Mute (Ẩn TV):** Tùy chỉnh bất kỳ ứng dụng, file thực thi hoặc script nào (ví dụ: `calc.exe`, `notepad.exe`, `C:\Tools\script.bat`, `wt.exe`) để tự động bật lên khi bạn kéo âm lượng về 0 hoặc bấm Tắt tiếng từ iPhone.
-  - **Kích hoạt khi Đánh thức / Tăng âm lượng lại:** Tùy chọn chạy một lệnh hoặc app khi TV mở lại hoặc có video mới cast tới.
-  - **Tùy chọn Khép TV xuống Taskbar:** Cho phép bật/tắt hành vi tự động khép TV xuống Taskbar khi âm lượng về 0%.
-  - **Nút "Chạy thử (Test)":** Kiểm tra chạy ngay app trên màn hình để kiểm chứng đường dẫn trước khi lưu.
-  - **Lưu trữ bền vững:** Tự động lưu cấu hình vĩnh viễn qua API `/api/settings/automation` vào `.yt-cast-store.json`.
-- 🧹 **Tắt sạch sẽ & Dọn dẹp triệt để mọi Service chạy ngầm (`stop.bat` & `tat-tv.bat`):**
-  - Bổ sung công cụ tắt chuyên dụng `stop.bat` và `tat-tv.bat` (kèm shortcut "Stop YouTube TV" trong Start menu khi cài bộ Setup).
-  - Giải phóng ngay lập tức cổng mạng 8547, tắt máy chủ Node.js và đóng toàn bộ tiến trình trình duyệt mang profile `YouTubeTV_Profile` mà không ảnh hưởng đến bất kỳ cửa sổ Chrome/Edge cá nhân nào khác.
-  - Cải tiến `start.bat`: khi người dùng nhấn phím bất kỳ để thoát, hệ thống tự động dọn dẹp sạch sẽ toàn bộ background process, không còn hiện tượng tiến trình chạy mồ côi (zombie processes) chiếm dụng tài nguyên.
-- 🎯 **Khắc phục triệt để lỗi nhận diện nhầm cửa sổ TV (`TvWindowManager.exe`):**
-  - Trước đây `TvWindowManager` chỉ kiểm tra từ khóa `"YouTube"` chung chung, dẫn đến việc nếu người dùng mở bất kỳ tab YouTube cá nhân nào, hệ thống nhận diện nhầm là app TV đang chạy và `start.bat` bỏ qua việc mở cửa sổ Kiosk.
-  - Đã nâng cấp thuật toán quét: sử dụng WMI truy vấn chính xác tiến trình mang tham số `YouTubeTV_Profile` và tiêu đề khớp nghiêm ngặt `"YouTube TV trên máy tính Windows"` / `"Trải Nghiệm TV Leanback PC"`.
-  - Tốc độ kiểm tra siêu nhanh (chỉ ~80ms) và loại bỏ hoàn toàn hiện tượng nhận diện nhầm (100% chính xác).
-- 🎯 **Mở lại chính xác Tab YouTube TV (Windows UI Automation):**
-  - Tích hợp `System.Windows.Automation` trực tiếp vào `TvWindowManager.exe`. Khi người dùng mở TV trong một cửa sổ trình duyệt có nhiều tab, hệ thống tự động quét cây UI và gọi `Select()` đúng tab "YouTube TV", không để bạn bị kẹt ở các tab làm việc khác.
-  - Khởi động cửa sổ dạng App độc lập (`--app="http://localhost:8547?tv=1"`), tách biệt 100% với các tab duyệt web cá nhân.
-- 🪟 **Kích hoạt trực tiếp êm ru (Loại bỏ triệt để hiệu ứng Alt-Tab):**
-  - Chuyển `SwitchToThisWindow(hWnd, false)` và gỡ bỏ phím Alt ảo (`VK_MENU`). Cửa sổ TV được đưa lên đầu màn hình (`HWND_TOPMOST`) một cách trực tiếp, êm ru và không còn chớp giao diện Alt-Tab.
-- 🐛 **Sửa lỗi Chrome tự tắt ngay sau khi mở:**
-  - Loại bỏ hoàn toàn đoạn mã `Stop-Process` kill nhầm các tiến trình con thiết yếu của Chrome (GPU process, Renderer).
-- 🛡️ **Bỏ qua hộp thoại hỏi khôi phục phiên crash:**
-  - Bổ sung `--disable-session-crashed-bubble`, `--profile-directory=Default`, và `--disable-features=ProfilePicker` giúp Chrome luôn mở mượt mà vào toàn màn hình, không bị treo ở hộp thoại "Restore pages?".
-- ⚡ **Bộ điều khiển cửa sổ Native siêu tốc (`bin/TvWindowManager.exe`):**
-  - Biên dịch nhị phân C# chạy chỉ trong 80ms, gắn kết trực tiếp desktop tương tác `WinSta0\Default`, kiểm soát cửa sổ chính xác tuyệt đối.
+- ⏱️ **Tự Động Nhận Diện Thời Lượng Chuẩn Cho Mọi Video (Bao Gồm Video Dài 3–4+ Tiếng):**
+  - Sửa dứt điểm hiện tượng video dài (> 3 tiếng) bị giới hạn thanh tua ở mức 44 phút do nhận nhầm thời lượng của video trước đó.
+  - Tích hợp cơ chế tải trước siêu dữ liệu từ YouTube siêu tốc (~250ms) bằng `resolveVideoMetadataAsync`, đọc trực tiếp `approxDurationMs` giúp thanh tua trên điện thoại mở rộng đầy đủ 100% (ví dụ video 4 giờ 27 phút) ngay khi bấm phát.
+  - Cơ chế ràng buộc thời lượng theo ID video (`currentDurationVideoId`): Chống rò rỉ thời lượng giữa các video liên tiếp và ngăn chặn các gói tin chương lẻ (Chapter/Tập) ghi đè làm tụt thời lượng tổng.
+- 👻 **Ẩn Hoàn Toàn Cửa Sổ Terminal / CMD Khi Chạy App (`YouTubeTV.exe` & `start.bat`):**
+  - Tích hợp trình khởi chạy Native GUI (`YouTubeTV.exe`, `/target:winexe`) ngay tại thư mục gốc và tự động đóng/ẩn cửa sổ `start.bat` (`WindowStyle Hidden`), giúp mở TV êm ru mà không bao giờ hiện cửa sổ CMD đen đè lên màn hình.
+  - Gắn cờ `windowsHide: true` cho toàn bộ tiến trình nền (`TvWindowManager.exe`, PowerShell, trình duyệt Kiosk) để không nháy cửa sổ dòng lệnh khi ẩn/hiện TV.
+- 🔄 **Khởi Động Sạch Sẽ (Full Clean Session Restart):**
+  - Cả `YouTubeTV.exe` và `start.bat` đều tự động kiểm tra và dọn dẹp các session cũ, giải phóng cổng `8547` và xóa sạch bộ nhớ đệm HTTP của Chrome Kiosk trước khi mở lại. Loại bỏ triệt để hiện tượng trắng màn hình do lệch mã băm bundle Vite.
+- ⏩ **Tua Video & Nhảy Nhanh `+10s / -10s` Siêu Mượt & Ổn Định Tuyệt Đối:**
+  - Loại bỏ trạng thái `LOADING` giả lập khi tua (`Player.seek()`), gửi trực tiếp phản hồi `onStateChange(PLAYING)` về điện thoại giúp thao tác bấm đúp `+10s` liên tiếp hoặc kéo thanh trượt mượt mà 100%, không bị giật lùi hay mất bộ đếm.
+  - Bổ sung phím tắt bàn phím PC `Mũi tên Trái / Phải` (`-10s / +10s`) bên cạnh cụm nút `-30s / -10s / +10s / +30s` trên Web Remote.
+- 🎬 **Tùy Chỉnh Độ Phân Giải Video (`4K`, `2K`, `1080p`, `720p`, `480p`, `Auto`):**
+  - Chọn và ghi nhớ độ phân giải ưu tiên ngay trên giao diện TV hoặc trên trang điều khiển điện thoại (`/remote`).
+- 💬 **Bật / Tắt Phụ Đề (CC / Subtitles) Chủ Động:**
+  - Mặc định tắt phụ đề (`cc_load_policy=0`) và tự động gỡ module `captions` khi ở chế độ Tắt.
+  - Hỗ trợ bật/tắt phụ đề trực tiếp từ nút **CC trên app YouTube của iPhone**, nút **CC** trên màn hình TV (phím tắt `C`), hoặc trên Web Remote (`Tắt` / `Tiếng Việt` / `English`).
+- 📡 **Hỗ Trợ Tua Ngược (DVR Rewind) Cho Video Công Chiếu & Trực Tiếp:**
+  - Đồng bộ dải `seekableStartTime` và `seekableEndTime` giúp kéo lùi trên luồng Livestream / Premiere không bị văng về Live Head.
+- 🌙 **Tự Động Về Chế Độ Chờ (Standby) Khi Hết Video:**
+  - Tự động chuyển về màn hình Chế độ chờ và thu nhỏ cửa sổ TV sau 1 giây khi phát hết video và không còn bài tiếp theo trong hàng đợi.

@@ -1,7 +1,7 @@
 # 🚀 YouTube TV Receiver for Windows - Release v1.4.0
 
 ### 📦 Tải bộ cài đặt:
-- **Tập tin cài đặt:** [`YouTube-TV-Receiver-Setup-v1.4.0.exe`](dist-installer/YouTube-TV-Receiver-Setup-v1.4.0.exe) (~113 MB)
+- **Tập tin cài đặt:** [⬇️ **Tải YouTube-TV-Receiver-Setup-v1.4.0.exe**](https://github.com/viphuygia/youtube-tv-pc-receiver/releases/download/v1.4.0/YouTube-TV-Receiver-Setup-v1.4.0.exe) (~29.1 MB)
 - **Hệ điều hành hỗ trợ:** Windows 10, Windows 11 (64-bit)
 - **Yêu cầu phần cứng:** Không cần cài đặt Node.js hay dòng lệnh (đã nhúng sẵn runtime portable).
 
