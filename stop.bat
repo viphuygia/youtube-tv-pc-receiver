@@ -15,7 +15,7 @@ echo [2/3] Dang dong cac tien trinh trinh duyet TV...
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*YouTubeTV_Profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 
 echo [3/3] Dang giai phong cong mang 8547 va ket thuc may chu...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8547') do (
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8547 ^| findstr LISTENING') do (
     if not "%%a"=="" if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
 )
 

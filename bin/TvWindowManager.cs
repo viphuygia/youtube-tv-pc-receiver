@@ -169,18 +169,13 @@ public class TvWindowManager {
           uint winPid;
           GetWindowThreadProcessId(hWnd, out winPid);
 
-          bool match = false;
-          if (profilePids.Count > 0) {
-            // Khi có profile YouTubeTV_Profile đang chạy, chỉ bắt chính xác cửa sổ Chrome_WidgetWin_1 của profile này
-            match = profilePids.Contains(winPid);
-          } else {
-            // Khi không tìm thấy profile, chỉ khớp tiêu đề chính xác của ứng dụng TV
-            match = title.IndexOf("YouTube TV trên máy tính Windows", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    title.IndexOf("Trải Nghiệm TV Leanback PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 && 
-                     title.IndexOf("Google Chrome", StringComparison.OrdinalIgnoreCase) < 0 && 
-                     title.IndexOf("Edge", StringComparison.OrdinalIgnoreCase) < 0);
-          }
+          bool matchPid = profilePids.Count > 0 && profilePids.Contains(winPid);
+          bool matchTitle = title.IndexOf("YouTube TV trên máy tính Windows", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            title.IndexOf("Trải Nghiệm TV Leanback PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 && 
+                             title.IndexOf("Google Chrome", StringComparison.OrdinalIgnoreCase) < 0 && 
+                             title.IndexOf("Edge", StringComparison.OrdinalIgnoreCase) < 0);
+          bool match = matchPid || matchTitle;
 
           if (match && !list.Contains(hWnd)) {
             list.Add(hWnd);
@@ -208,19 +203,16 @@ public class TvWindowManager {
               if (sbCls.ToString() != "Chrome_WidgetWin_1") continue;
 
               uint pId = (uint)proc.Id;
-              bool match = false;
-              if (profilePids.Count > 0) {
-                match = profilePids.Contains(pId);
-              } else {
-                StringBuilder sb = new StringBuilder(512);
-                GetWindowText(h, sb, 512);
-                string title = sb.ToString();
-                match = title.IndexOf("YouTube TV trên máy tính Windows", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        title.IndexOf("Trải Nghiệm TV Leanback PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 && 
-                         title.IndexOf("Google Chrome", StringComparison.OrdinalIgnoreCase) < 0 && 
-                         title.IndexOf("Edge", StringComparison.OrdinalIgnoreCase) < 0);
-              }
+              bool matchPid = profilePids.Count > 0 && profilePids.Contains(pId);
+              StringBuilder sb = new StringBuilder(512);
+              GetWindowText(h, sb, 512);
+              string title = sb.ToString();
+              bool matchTitle = title.IndexOf("YouTube TV trên máy tính Windows", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                title.IndexOf("Trải Nghiệm TV Leanback PC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                (title.IndexOf("YouTube TV", StringComparison.OrdinalIgnoreCase) >= 0 && 
+                                 title.IndexOf("Google Chrome", StringComparison.OrdinalIgnoreCase) < 0 && 
+                                 title.IndexOf("Edge", StringComparison.OrdinalIgnoreCase) < 0);
+              bool match = matchPid || matchTitle;
               if (match) {
                 list.Add(h);
               }

@@ -1897,10 +1897,13 @@ app.post('/api/quit', async (req, res) => {
 // ==========================================
 // Vite / Static Frontend
 // ==========================================
-const isProd = process.env.NODE_ENV === 'production';
+const isProd = process.env.NODE_ENV === 'production' || fs.existsSync(path.resolve(__dirname, 'dist', 'index.html'));
 
 async function startServer() {
-  if (!isProd) {
+  const distDir = path.resolve(__dirname, 'dist');
+  const assetsDir = path.resolve(distDir, 'assets');
+
+  if (!isProd || !fs.existsSync(path.resolve(distDir, 'index.html'))) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1908,9 +1911,52 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    // Tự động ánh xạ file bundle .js / .css mới nhất nếu trình duyệt còn lưu cache tên hash cũ (chống tuyệt đối lỗi màn hình trắng)
+    app.use('/assets', (req, res, next) => {
+      const requestedFile = path.join(assetsDir, path.basename(req.path));
+      if (fs.existsSync(requestedFile)) {
+        return next();
+      }
+      try {
+        if (fs.existsSync(assetsDir)) {
+          const files = fs.readdirSync(assetsDir);
+          if (req.path.endsWith('.js')) {
+            const latestJs = files.find(f => f.startsWith('index-') && f.endsWith('.js'));
+            if (latestJs) {
+              res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+              res.type('application/javascript');
+              return res.sendFile(path.join(assetsDir, latestJs));
+            }
+          } else if (req.path.endsWith('.css')) {
+            const latestCss = files.find(f => f.startsWith('index-') && f.endsWith('.css'));
+            if (latestCss) {
+              res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+              res.type('text/css');
+              return res.sendFile(path.join(assetsDir, latestCss));
+            }
+          }
+        }
+      } catch {}
+      next();
+    });
+
+    app.use(express.static(distDir, {
+      etag: false,
+      lastModified: false,
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
+
     app.use((req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.sendFile(path.resolve(distDir, 'index.html'));
     });
   }
 

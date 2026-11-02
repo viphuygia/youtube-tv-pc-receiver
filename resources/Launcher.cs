@@ -10,7 +10,7 @@ namespace YouTubeTVReceiver
     static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             string exeDir = AppDomain.CurrentDomain.BaseDirectory;
             string appDir = exeDir;
@@ -24,6 +24,29 @@ namespace YouTubeTVReceiver
             }
 
             Environment.CurrentDirectory = appDir;
+            string tempProfile = Path.Combine(Path.GetTempPath(), "YouTubeTV_Profile");
+
+            bool skipKill = false;
+            if (args != null)
+            {
+                foreach (string a in args)
+                {
+                    if (string.Equals(a, "--skip-kill", StringComparison.OrdinalIgnoreCase))
+                    {
+                        skipKill = true;
+                    }
+                }
+            }
+
+            // 0. Dọn dẹp triệt để mọi phiên cũ (Full Restart) để tránh kẹt process hoặc trắng màn hình do cache cũ
+            if (!skipKill)
+            {
+                KillExistingSessions(appDir, tempProfile);
+            }
+            else
+            {
+                ClearProfileHttpCache(tempProfile);
+            }
 
             // 1. Locate Node.js (prefer local portable node.exe, then system node)
             string nodePath = Path.Combine(appDir, "node.exe");
@@ -38,7 +61,6 @@ namespace YouTubeTVReceiver
 
             string serverArgs = "";
             string serverMjs = Path.Combine(appDir, "server.mjs");
-            string stagingMjs = Path.Combine(appDir, "build-staging", "server.mjs");
             string distServerMjs = Path.Combine(appDir, "dist-server", "server.mjs");
             string tsxCli = Path.Combine(appDir, "node_modules", "tsx", "dist", "cli.mjs");
             string serverTs = Path.Combine(appDir, "server.ts");
@@ -47,20 +69,16 @@ namespace YouTubeTVReceiver
             {
                 serverArgs = "\"" + serverMjs + "\"";
             }
-            else if (File.Exists(stagingMjs))
+            else if (File.Exists(tsxCli) && File.Exists(serverTs))
             {
-                serverArgs = "\"" + stagingMjs + "\"";
+                serverArgs = "\"" + tsxCli + "\" \"" + serverTs + "\"";
             }
             else if (File.Exists(distServerMjs))
             {
                 serverArgs = "\"" + distServerMjs + "\"";
             }
-            else if (File.Exists(tsxCli) && File.Exists(serverTs))
-            {
-                serverArgs = "\"" + tsxCli + "\" \"" + serverTs + "\"";
-            }
 
-            // 2. Check if server is already running on port 8547
+            // 2. Start fresh server on port 8547
             bool serverRunning = IsServerReady();
             Process nodeProc = null;
 
@@ -118,65 +136,6 @@ namespace YouTubeTVReceiver
             }
             catch { }
 
-            // 3.5 Check if Kiosk browser is already running (Single-Instance Protection)
-            if (serverRunning)
-            {
-                bool kioskAlreadyRunning = false;
-                try
-                {
-                    HttpWebRequest kReq = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:8547/api/is-kiosk-running");
-                    kReq.Timeout = 1200;
-                    using (HttpWebResponse kRes = (HttpWebResponse)kReq.GetResponse())
-                    using (StreamReader reader = new StreamReader(kRes.GetResponseStream()))
-                    {
-                        string resp = reader.ReadToEnd();
-                        if (resp.Contains("\"running\":true"))
-                        {
-                            kioskAlreadyRunning = true;
-                        }
-                    }
-                }
-                catch { }
-
-                if (kioskAlreadyRunning)
-                {
-                    // Cửa sổ đã mở trước đó -> Đánh thức và khôi phục hiển thị, KHÔNG mở thêm cửa sổ mới!
-                    try
-                    {
-                        HttpWebRequest wakeReq = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:8547/api/standby");
-                        wakeReq.Method = "POST";
-                        wakeReq.ContentType = "application/json";
-                        wakeReq.Timeout = 1200;
-                        using (StreamWriter sw = new StreamWriter(wakeReq.GetRequestStream()))
-                        {
-                            sw.Write("{\"standby\":false}");
-                        }
-                        using (wakeReq.GetResponse()) { }
-                    }
-                    catch { }
-
-                    try
-                    {
-                        string winMgr = Path.Combine(appDir, "bin", "TvWindowManager.exe");
-                        if (File.Exists(winMgr))
-                        {
-                            ProcessStartInfo psiRestore = new ProcessStartInfo
-                            {
-                                FileName = winMgr,
-                                Arguments = "restore",
-                                WorkingDirectory = appDir,
-                                UseShellExecute = false,
-                                CreateNoWindow = true,
-                                WindowStyle = ProcessWindowStyle.Hidden
-                            };
-                            Process.Start(psiRestore);
-                        }
-                    }
-                    catch { }
-                    return;
-                }
-            }
-
             // 4. Find Chrome or Edge
             string browserPath = FindBrowser();
             if (string.IsNullOrEmpty(browserPath))
@@ -185,8 +144,7 @@ namespace YouTubeTVReceiver
                 return;
             }
 
-            string tempProfile = Path.Combine(Path.GetTempPath(), "YouTubeTV_Profile");
-            string chromeArgs = "--user-data-dir=\"" + tempProfile + "\" --profile-directory=Default --no-first-run --no-default-browser-check --disable-features=ProfilePicker --disable-session-crashed-bubble " + displayFlags + " --autoplay-policy=no-user-gesture-required --start-fullscreen --app=\"http://localhost:8547?tv=1\"";
+            string chromeArgs = "--user-data-dir=\"" + tempProfile + "\" --profile-directory=Default --no-first-run --no-default-browser-check --disable-features=ProfilePicker --disable-session-crashed-bubble --disk-cache-size=1 --media-cache-size=1 " + displayFlags + " --autoplay-policy=no-user-gesture-required --start-fullscreen --app=\"http://localhost:8547?tv=1\"";
 
             ProcessStartInfo psiBrowser = new ProcessStartInfo
             {
@@ -203,6 +161,93 @@ namespace YouTubeTVReceiver
             catch (Exception ex)
             {
                 MessageBox.Show("Lỗi khởi động trình duyệt Kiosk:\n" + ex.Message, "YouTube TV Receiver", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        static void KillExistingSessions(string appDir, string tempProfile)
+        {
+            // 1. Gửi tín hiệu tắt nhẹ nhàng cho máy chủ cũ (nếu đang chạy)
+            try
+            {
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:8547/api/quit");
+                req.Method = "POST";
+                req.Timeout = 500;
+                using (req.GetResponse()) { }
+            }
+            catch { }
+
+            // 2. Đóng cửa sổ TV thông qua TvWindowManager nếu có
+            try
+            {
+                string winMgr = Path.Combine(appDir, "bin", "TvWindowManager.exe");
+                if (File.Exists(winMgr))
+                {
+                    ProcessStartInfo psiClose = new ProcessStartInfo
+                    {
+                        FileName = winMgr,
+                        Arguments = "close",
+                        WorkingDirectory = appDir,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    using (Process p = Process.Start(psiClose))
+                    {
+                        if (p != null) p.WaitForExit(1500);
+                    }
+                }
+            }
+            catch { }
+
+            // 3. Dọn dẹp triệt để mọi tiến trình trình duyệt YouTubeTV_Profile và tiến trình giữ cổng 8547
+            try
+            {
+                string cleanupCmd =
+                    "Get-CimInstance Win32_Process | Where-Object { " +
+                    "$_.CommandLine -like '*YouTubeTV_Profile*' -or " +
+                    "($_.Name -eq 'node.exe' -and ($_.CommandLine -like '*server.ts*' -or $_.CommandLine -like '*server.mjs*')) " +
+                    "} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; " +
+                    "Get-NetTCPConnection -LocalPort 8547 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { " +
+                    "if ($_.OwningProcess -gt 0) { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } " +
+                    "}";
+
+                ProcessStartInfo psiKill = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -WindowStyle Hidden -Command \"" + cleanupCmd + "\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                using (Process p = Process.Start(psiKill))
+                {
+                    if (p != null) p.WaitForExit(4000);
+                }
+            }
+            catch { }
+
+            ClearProfileHttpCache(tempProfile);
+            Thread.Sleep(300);
+        }
+
+        static void ClearProfileHttpCache(string tempProfile)
+        {
+            string[] cacheDirs = new string[]
+            {
+                Path.Combine(tempProfile, "Default", "Cache"),
+                Path.Combine(tempProfile, "Default", "Code Cache"),
+                Path.Combine(tempProfile, "Default", "GPUCache")
+            };
+            foreach (string dir in cacheDirs)
+            {
+                try
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        Directory.Delete(dir, true);
+                    }
+                }
+                catch { }
             }
         }
 
